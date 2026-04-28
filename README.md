@@ -44,29 +44,29 @@ pip install -r requirements.txt
 
 1. Abrir `Extratores.xlsm` (localizado em OneDrive\Documentos\Automações\)
 2. Clicar no botão do extrator desejado
-3. Selecionar a pasta com os PDFs (já descriptografados para o Santander)
-4. Dados são gravados na aba `LctosTratados` — modo sobrescrita
+3. Informar pasta de entrada no formato `input/NOME_CLIENTE/`
+4. Dados são gravados na aba `LctosTratados` — **modo append acumulativo**
 
 ## PDFs protegidos por senha (Santander)
 
 Senha de abertura = CPF/CNPJ do titular do cartão.
-Descriptografar manualmente com pikepdf antes de processar:
-
-```python
-import pikepdf
-pikepdf.open("fatura.pdf", password="00000000000").save("Livre-fatura.pdf")
-```
+Integração in-memory via pikepdf (arg `--password`) — sem arquivo descriptografado em disco.
 
 ## Saída — aba LctosTratados
 
-| Coluna | Conteúdo |
-|---|---|
-| Arquivo Origem | Caminho absoluto do PDF fonte |
-| Data Vencimento | Data da fatura (dd/mm/yyyy) |
-| Descrição | Lançamento + parcela + data da compra |
-| Valor (R$) | Numérico com sinal (débitos negativos) |
-| Tipo | Pagamento / Compra parcelada / Compra à vista / Outros / Ajuste |
-| Titular - Cartão | NOME TITULAR - XXXX (4 últimos dígitos) |
+| Col | Campo | Conteúdo |
+|-----|-------|----------|
+| A | Cliente | Nome do cliente (arg --cliente) |
+| B | ID_Lote | Identificador do lote: `{EMISSOR}-{AAAAMMDD}-{HHMMSS}` |
+| C | Arquivo Origem | Nome do arquivo PDF (sem caminho absoluto) |
+| D | Data Vencimento | Data serial Excel (dd/mm/yyyy) |
+| E | Descrição | Nome do estabelecimento (sem parcela embutida) |
+| F | Parcela | Ex: "02/06" ou vazio se não parcelado |
+| G | Valor (R$) | Numérico com sinal (débitos negativos) |
+| H | Tipo | Pagamento / Compra parcelada / Compra à vista / Outros / Ajuste |
+| I | Titular - Cartão | NOME TITULAR - XXXX (4 últimos dígitos) |
+
+**Rollback de lote:** deletar todas as linhas onde Col B = ID_Lote do lote a reverter.
 
 ## Emissores suportados
 
@@ -77,14 +77,23 @@ pikepdf.open("fatura.pdf", password="00000000000").save("Livre-fatura.pdf")
 
 ## Gaps conhecidos (backlog pós-MVP)
 
-- G1: sem campo Cliente — isolamento por cliente depende de disciplina do operador
-- G2: pikepdf não integrado aos scripts — etapa manual
-- G3: sem ID_Lote — rollback de lotes com erro não é rastreável
-- G5: credenciais em texto claro na aba Senhas do Excel (OneDrive)
+- G2: pikepdf não integrado aos scripts — etapa ainda manual (TASK-03)
+- G5: credenciais em texto claro na aba Senhas do Excel (OneDrive) — conforme BR-08 para MVP; mitigação obrigatória antes de distribuição a terceiros
+
+> G1 (campo Cliente) e G3 (ID_Lote) resolvidos no design v1.5 — implementação pendente nas TASKs.
 
 ## Requisitos de negócio
 
 Ver `docs/Requiriments_*.md` — regras BR-01 a BR-08.
+
+## Convenção de nomenclatura de arquivos
+
+Arquivos versionados seguem o padrão: `nome_AAAAMMDD_HHMM`
+
+- `AAAAMMDD` = data de geração
+- `HHMM` = horário de geração (24h) — **não é número de versão**
+
+Exemplo: `Checkpoint_Sinc_20260428_0444.md` = gerado em 28/04/2026 às 04:44.
 
 ---
 
