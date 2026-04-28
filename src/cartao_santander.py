@@ -28,9 +28,9 @@ X_DIV = 250  # divisão entre coluna esq e dir
 # Utilitários
 # ---------------------------------------------------------------------------
 
-def extrair_texto_pdf(caminho: Path) -> str:
+def extrair_texto_pdf(source) -> str:
     partes = []
-    with pdfplumber.open(str(caminho)) as pdf:
+    with pdfplumber.open(source) as pdf:
         for page in pdf.pages:
             t = page.extract_text()
             if t:
@@ -141,12 +141,12 @@ def extrair_segmento(page, col: str) -> list:
 # Parsing completo — ordem linear 2e→2d→3e→3d...
 # ---------------------------------------------------------------------------
 
-def parsear_lancamentos(caminho: Path, vencimento: date) -> list:
+def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
     lancamentos  = []
     vistos       = set()
     titular_atual = "Desconhecido"
 
-    with pdfplumber.open(str(caminho)) as pdf:
+    with pdfplumber.open(source if source is not None else caminho) as pdf:
         paginas = list(range(len(pdf.pages)))
 
         # Ordem linear: pe, pd para cada página
@@ -238,10 +238,25 @@ def validar_total(lancamentos: list, texto: str):
 
 
 # ---------------------------------------------------------------------------
+# Descriptografia in-memory (BR-06)
+# ---------------------------------------------------------------------------
+
+def _descriptografar(pdf_path: Path, password: str):
+    if not password:
+        return pdf_path
+    import pikepdf
+    with pikepdf.open(pdf_path, password=password) as pdf:
+        buf = io.BytesIO()
+        pdf.save(buf)
+        buf.seek(0)
+    return buf
+
+
+# ---------------------------------------------------------------------------
 # Processar pasta
 # ---------------------------------------------------------------------------
 
-def processar_pasta(pasta: Path) -> list:
+def processar_pasta(pasta: Path, password: str = "") -> list:
     pdfs_vistos = {}
     for p in pasta.glob("*"):
         if p.suffix.lower() == ".pdf":
@@ -254,9 +269,12 @@ def processar_pasta(pasta: Path) -> list:
     todos = []
 
     for pdf_path in pdfs:
-        texto       = extrair_texto_pdf(pdf_path)
+        source      = _descriptografar(pdf_path, password)
+        texto       = extrair_texto_pdf(source)
+        if isinstance(source, io.BytesIO):
+            source.seek(0)
         venc        = extrair_vencimento(texto)
-        lancamentos = parsear_lancamentos(pdf_path, venc)
+        lancamentos = parsear_lancamentos(pdf_path, venc, source)
         ok, total_pdf, total_calc = validar_total(lancamentos, texto)
 
         if not ok:
@@ -298,7 +316,7 @@ if __name__ == "__main__":
     id_lote = f"SA-{ts.strftime('%Y%m%d-%H%M%S')}"
 
     try:
-        lancamentos = processar_pasta(input_path)
+        lancamentos = processar_pasta(input_path, args.password)
         envelope = {
             "id_lote":            id_lote,
             "data_processamento": ts.isoformat(timespec="seconds"),
