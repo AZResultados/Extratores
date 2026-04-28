@@ -247,7 +247,7 @@ def validar_total(lancamentos: list, texto: str):
 # Processar pasta
 # ---------------------------------------------------------------------------
 
-def processar_pasta(pasta: Path) -> dict:
+def processar_pasta(pasta: Path) -> list:
     pdfs_vistos = {}
     for p in pasta.glob("*"):
         if p.suffix.lower() == ".pdf":
@@ -256,33 +256,28 @@ def processar_pasta(pasta: Path) -> dict:
     pdfs = sorted(pdfs_vistos.values())
 
     if not pdfs:
-        return {"lancamentos": [], "erros": ["Nenhum PDF encontrado na pasta."]}
+        raise FileNotFoundError("Nenhum PDF encontrado na pasta.")
 
     todos_lancamentos = []
-    erros = []
 
     for pdf_path in pdfs:
-        try:
-            texto          = extrair_texto_pdf(pdf_path)
-            venc           = extrair_vencimento(texto)
-            titular_cartao = extrair_titular_cartao(texto)
-            lancamentos    = parsear_lancamentos(texto, venc, pdf_path)
-            ok, total_pdf, total_calc = validar_total(lancamentos, texto)
+        texto          = extrair_texto_pdf(pdf_path)
+        venc           = extrair_vencimento(texto)
+        titular_cartao = extrair_titular_cartao(texto)
+        lancamentos    = parsear_lancamentos(texto, venc, pdf_path)
+        ok, total_pdf, total_calc = validar_total(lancamentos, texto)
 
-            if not ok:
-                erros.append(
-                    f"{pdf_path.name}: divergência R$ {abs(total_pdf - total_calc):.2f} "
-                    f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
-                )
+        if not ok:
+            raise ValueError(
+                f"{pdf_path.name}: divergência R$ {abs(total_pdf - total_calc):.2f} "
+                f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
+            )
 
-            for l in lancamentos:
-                l["titular_cartao"] = titular_cartao
-            todos_lancamentos.extend(lancamentos)
+        for l in lancamentos:
+            l["titular_cartao"] = titular_cartao
+        todos_lancamentos.extend(lancamentos)
 
-        except Exception as e:
-            erros.append(f"{pdf_path.name}: {e}")
-
-    return {"lancamentos": todos_lancamentos, "erros": erros}
+    return todos_lancamentos
 
 
 # ---------------------------------------------------------------------------
@@ -294,10 +289,14 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2:
         pasta = Path(sys.argv[1])
         if not pasta.exists():
-            print(json.dumps({"erro": f"Pasta não encontrada: {pasta}"}))
+            print(f"ERRO: Pasta não encontrada: {pasta}", file=sys.stderr)
             sys.exit(1)
     else:
         pasta = selecionar_pasta()
 
-    resultado = processar_pasta(pasta)
-    print(json.dumps(resultado, ensure_ascii=False))
+    try:
+        lancamentos = processar_pasta(pasta)
+        print(json.dumps({"lancamentos": lancamentos}, ensure_ascii=False))
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
