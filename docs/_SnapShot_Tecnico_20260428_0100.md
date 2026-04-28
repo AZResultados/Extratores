@@ -17,7 +17,7 @@ C:\Dev\projetos\Extratores\          ← raiz do projeto / repositório Git
     └── Scripts\
         └── python.exe
 
-C:\Users\jwcos\OneDrive - Azmid\Documentos\Automações\
+C:\Users\[operador]\OneDrive - [empresa]\Documentos\Automações\
 └── Extratores.xlsm                   ← hub de controle + destino dos dados
     ├── VBA: ModComum                 ← orquestrador (ProcessarExtrator)
     ├── VBA: ModMP                    ← ProcessarMP → chama ModComum("B2")
@@ -112,7 +112,7 @@ ModComum.ProcessarExtrator()
 | **Conteúdo** | Santander: CPF/CNPJ numérico do titular; Mercado Pago: `ND`; Samsung: CPF parcial |
 | **Uso atual** | **Manual** — o operador lê a senha na aba e a informa ao pikepdf separadamente, antes de rodar o extrator |
 | **Integração com scripts** | Nenhuma — `cartao_santander.py` e `cartao_mercadopago.py` recebem PDFs já descriptografados |
-| **Risco** | Arquivo em OneDrive (`C:\Users\jwcos\OneDrive - Azmid\...`) — credenciais sincronizadas para a nuvem em texto claro |
+| **Risco** | Arquivo em OneDrive (`C:\Users\[operador]\OneDrive - [empresa]\Documentos\Automações\....`) — credenciais sincronizadas para a nuvem em texto claro |
 | **Enquadramento BR-08** | Conforme para MVP (operador único = proprietário AZ Resultados). Torna-se violação crítica em qualquer distribuição para terceiros |
 | **Natureza da credencial** | Senha de abertura de PDF (CPF/CNPJ do titular) — não é senha de acesso bancário |
 

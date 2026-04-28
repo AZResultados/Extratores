@@ -62,7 +62,7 @@ AZResultados/Extratores/          ← raiz Git (PUBLIC)
     └── Checkpoint_*.md           ← decisões arquitetura
 
 Fora do repo (não versionado):
-C:\Users\[user]\OneDrive - Azmid\Documentos\Automações\
+C:\Users\[operador]\OneDrive - [empresa]\Documentos\Automações\
 └── Extratores.xlsm
     ├── VBA: ModComum / ModMP / ModSantander
     ├── Aba: LctosTratados       ← destino único lançamentos
