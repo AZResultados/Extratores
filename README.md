@@ -85,3 +85,20 @@ pikepdf.open("fatura.pdf", password="00000000000").save("Livre-fatura.pdf")
 ## Requisitos de negócio
 
 Ver `docs/Requiriments_*.md` — regras BR-01 a BR-08.
+
+---
+
+## ⚠️ Regras de segurança para contribuidores
+
+Este repositório é **público**. Todo o histórico de commits é visível permanentemente.
+
+**Nunca incluir em commits, mensagens de commit ou arquivos versionados:**
+- Nomes de clientes da AZ Resultados
+- CPF, CNPJ ou qualquer dado pessoal
+- Senhas de PDF ou credenciais de qualquer natureza
+- Dados financeiros reais de clientes
+
+**Antes de commitar, verificar:**
+- O conteúdo dos arquivos modificados não contém dados sensíveis
+- A mensagem do commit é genérica e descritiva — sem referência a clientes ou operações específicas
+- Arquivos de configuração local (aba Senhas, Config) nunca são adicionados ao repositório
