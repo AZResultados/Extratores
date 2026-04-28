@@ -2,138 +2,150 @@ Attribute VB_Name = "ModComum"
 ' =============================================================================
 ' ModComum - Funções compartilhadas entre todos os extratores
 ' =============================================================================
+' Config layout esperado:
+'   B1 = caminho pythonExe
+'   B2 = caminho script Mercado Pago
+'   B3 = caminho script Santander
+'   B4 = nomeCliente  (ex: "JW")
+'   B5 = inputDir Mercado Pago
+'   B6 = inputDir Santander
+' Senhas layout esperado:
+'   B1 = senha Santander (CPF/CNPJ do titular) — em branco se não criptografado
 
-Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String)
+Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String, _
+                      nomeCliente As String, inputDir As String, _
+                      Optional senha As String = "")
 
-    Dim wsDados    As Worksheet
     Dim wsConfig   As Worksheet
+    Dim wsDados    As Worksheet
     Dim pythonExe  As String
     Dim scriptPath As String
-    Dim jsonOutput As String
-    Dim tempFile   As String
     Dim cmd        As String
+    Dim jsonStr    As String
+    Dim errStr     As String
 
-    Set wsDados = ThisWorkbook.Sheets("LctosTratados")
     Set wsConfig = ThisWorkbook.Sheets("Config")
+    Set wsDados  = ThisWorkbook.Sheets("LctosTratados")
 
-    pythonExe = wsConfig.Range("B1").Value
+    pythonExe  = wsConfig.Range("B1").Value
     scriptPath = wsConfig.Range(celulaScript).Value
-    tempFile = "C:\Temp\extratores_output.json"
 
-    If Dir("C:\Temp", vbDirectory) = "" Then MkDir "C:\Temp"
-
+    ' -------------------------------------------------------------------------
+    ' Monta comando CLI (BR-02)
+    ' -------------------------------------------------------------------------
     cmd = "cmd /c chcp 65001 > nul && " & _
-          Chr(34) & pythonExe & Chr(34) & " " & _
-          Chr(34) & scriptPath & Chr(34) & " > " & _
-          Chr(34) & tempFile & Chr(34)
+          Chr(34) & pythonExe  & Chr(34) & " " & _
+          Chr(34) & scriptPath & Chr(34) & _
+          " --cliente "   & Chr(34) & nomeCliente & Chr(34) & _
+          " --input-dir " & Chr(34) & inputDir    & Chr(34)
 
-    Dim wsh As Object
-    Set wsh = CreateObject("WScript.Shell")
-    wsh.Run cmd, 1, True
+    If Len(Trim(senha)) > 0 Then
+        cmd = cmd & " --password " & Chr(34) & senha & Chr(34)
+    End If
 
-    If Dir(tempFile) = "" Then
-        MsgBox "Operacao cancelada ou erro ao executar " & nomeExtrator & ".", vbExclamation
+    ' -------------------------------------------------------------------------
+    ' Exec() — captura stdout/stderr, zero arquivo temporário (BR-06)
+    ' ORDEM OBRIGATÓRIA: StdOut.ReadAll antes de ExitCode (previne deadlock pipe)
+    ' -------------------------------------------------------------------------
+    Dim oShell As Object
+    Dim oExec  As Object
+    Set oShell = CreateObject("WScript.Shell")
+    Set oExec  = oShell.Exec(cmd)
+
+    jsonStr = oExec.StdOut.ReadAll
+    errStr  = oExec.StdErr.ReadAll
+
+    ' -------------------------------------------------------------------------
+    ' Fail-fast (BR-03): ExitCode <> 0 → aborta, zero gravação
+    ' -------------------------------------------------------------------------
+    If oExec.ExitCode <> 0 Then
+        MsgBox "ERRO ao executar " & nomeExtrator & ":" & vbCrLf & errStr, vbCritical
         Exit Sub
     End If
 
-    ' Le JSON em UTF-8
-    Dim stream As Object
-    Set stream = CreateObject("ADODB.Stream")
-    stream.Charset = "UTF-8"
-    stream.Open
-    stream.LoadFromFile tempFile
-    jsonOutput = stream.ReadText
-    stream.Close
-
-    ' Verifica erro critico
-    Dim chaveErro  As String
-    Dim chaveErros As String
-    chaveErro = Chr(34) & "erro" & Chr(34)
-    chaveErros = Chr(34) & "erros" & Chr(34)
-    If InStr(jsonOutput, chaveErro) > 0 And InStr(jsonOutput, chaveErros) = 0 Then
-        MsgBox "Erro retornado pelo Python:" & vbCrLf & jsonOutput, vbCritical
-        Exit Sub
+    ' ExitCode = 0 com stderr não-vazio → aviso técnico (não aborta)
+    If Len(Trim(errStr)) > 0 Then
+        MsgBox "Aviso técnico (" & nomeExtrator & "):" & vbCrLf & errStr, vbExclamation
     End If
 
-    ' Limpa dados anteriores
+    ' -------------------------------------------------------------------------
+    ' Verifica avisos do envelope (não-fatais)
+    ' -------------------------------------------------------------------------
+    Dim avisosStr As String
+    avisosStr = ExtrairArray(jsonStr, "avisos")
+    If Len(avisosStr) > 2 Then
+        MsgBox "Avisos (" & nomeExtrator & "):" & vbCrLf & avisosStr, vbExclamation
+    End If
+
+    ' -------------------------------------------------------------------------
+    ' Grava lançamentos — schema target
+    ' Colunas: A=cliente  B=id_lote  C=arquivo  D=vencimento  E=descricao
+    '          F=parcela  G=valor    H=tipo      I=titular_cartao
+    ' TASK-06 converterá este bloco para APPEND acumulativo com migração
+    ' -------------------------------------------------------------------------
+    Dim chaveArray As String
+    Dim posArray   As Long
+    Dim posStart   As Long
+    Dim posEnd     As Long
+    Dim objStr     As String
+    Dim rowNum     As Long
+
+    ' Limpa dados anteriores (TASK-06 substituirá por APPEND com id_lote)
     Dim lastRow As Long
     lastRow = wsDados.Cells(wsDados.Rows.Count, 1).End(xlUp).Row
     If lastRow > 1 Then wsDados.Rows("2:" & lastRow).Delete
 
-    ' Localiza array de lancamentos
-    Dim chaveArray As String
     chaveArray = Chr(34) & "lancamentos" & Chr(34) & ": ["
+    rowNum   = 2
+    posArray = InStr(jsonStr, chaveArray)
+    posStart = InStr(posArray, jsonStr, "{")
 
-    Dim posArray As Long
-    Dim posStart As Long
-    Dim posEnd   As Long
-    Dim errosPos As Long
-    Dim objStr   As String
-    Dim rowNum   As Long
+    Do While posStart > 0
+        posEnd = InStr(posStart, jsonStr, "}")
+        If posEnd = 0 Then Exit Do
 
-    rowNum = 2
-    posArray = InStr(jsonOutput, chaveArray)
-    errosPos = InStr(jsonOutput, chaveErros)
-    posStart = InStr(posArray, jsonOutput, "{")
+        objStr = Mid(jsonStr, posStart, posEnd - posStart + 1)
 
-    Do While posStart > 0 And posStart < errosPos
-        posEnd = InStr(posStart, jsonOutput, "}")
-        If posEnd = 0 Or posEnd > errosPos Then Exit Do
-
-        objStr = Mid(jsonOutput, posStart, posEnd - posStart + 1)
-
+        Dim fCliente As String
+        Dim fIdLote  As String
         Dim fArquivo As String
         Dim fVenc    As String
         Dim fDesc    As String
+        Dim fParcela As String
         Dim fValor   As String
         Dim fTipo    As String
         Dim fTitular As String
 
-        fArquivo = ExtrairCampo(objStr, "arquivo_origem")
-        fVenc = ExtrairCampo(objStr, "data_vencimento")
-        fDesc = ExtrairCampo(objStr, "descricao")
-        fValor = ExtrairCampo(objStr, "valor_brl")
-        fTipo = ExtrairCampo(objStr, "tipo")
+        fCliente = ExtrairCampo(objStr, "cliente")
+        fIdLote  = ExtrairCampo(objStr, "id_lote")
+        fArquivo = ExtrairCampo(objStr, "arquivo")
+        fVenc    = ExtrairCampo(objStr, "vencimento")
+        fDesc    = ExtrairCampo(objStr, "descricao")
+        fParcela = ExtrairCampo(objStr, "parcela")
+        fValor   = ExtrairCampo(objStr, "valor")
+        fTipo    = ExtrairCampo(objStr, "tipo")
         fTitular = ExtrairCampo(objStr, "titular_cartao")
-        If fTitular = "" Then fTitular = "ND"
 
         With wsDados
-            .Cells(rowNum, 1).Value = fArquivo
-            .Cells(rowNum, 2).Value = CDate(fVenc)
-            .Cells(rowNum, 2).NumberFormat = "dd/mm/yyyy"
-            .Cells(rowNum, 3).Value = fDesc
-            .Cells(rowNum, 4).Value = CDbl(Replace(fValor, ".", ","))
-            .Cells(rowNum, 4).NumberFormat = "#,##0.00"
-            .Cells(rowNum, 5).Value = fTipo
-            .Cells(rowNum, 6).Value = fTitular
-
-            Dim fillColor As Long
-            If rowNum Mod 2 = 0 Then
-                fillColor = RGB(235, 243, 255)
-            Else
-                fillColor = RGB(255, 255, 255)
-            End If
-
-            Dim c As Integer
-            For c = 1 To 6
-                .Cells(rowNum, c).Interior.Color = fillColor
-            Next c
+            .Cells(rowNum, 1).Value = fCliente
+            .Cells(rowNum, 2).Value = fIdLote
+            .Cells(rowNum, 3).Value = fArquivo
+            .Cells(rowNum, 4).Value = CDate(fVenc)
+            .Cells(rowNum, 4).NumberFormat = "dd/mm/yyyy"
+            .Cells(rowNum, 5).Value = fDesc
+            .Cells(rowNum, 6).Value = fParcela
+            .Cells(rowNum, 7).Value = CDbl(Replace(fValor, ".", ","))
+            .Cells(rowNum, 7).NumberFormat = "#,##0.00"
+            .Cells(rowNum, 8).Value = fTipo
+            .Cells(rowNum, 9).Value = fTitular
         End With
 
-        rowNum = rowNum + 1
-        posStart = InStr(posEnd, jsonOutput, "{")
+        rowNum   = rowNum + 1
+        posStart = InStr(posEnd, jsonStr, "{")
     Loop
 
-    ' Verifica erros reportados
-    Dim errosStr As String
-    errosStr = ExtrairArray(jsonOutput, "erros")
-    If Len(errosStr) > 2 Then
-        MsgBox "Concluido com avisos:" & vbCrLf & errosStr, vbExclamation
-    Else
-        MsgBox (rowNum - 2) & " lancamentos importados com sucesso! (" & nomeExtrator & ")", vbInformation
-    End If
+    MsgBox (rowNum - 2) & " lancamentos importados (" & nomeExtrator & ")", vbInformation
 
-    Kill tempFile
     wsDados.Activate
     wsDados.Cells(2, 1).Select
 
