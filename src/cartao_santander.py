@@ -2,12 +2,14 @@
 Extrator de Fatura - Cartão de Crédito Santander
 Ordem de leitura linear: 2e → 2d → 3e → 3d → 4e → 4d ...
 Titular carrega sequencialmente entre segmentos.
+Chamado pelo Excel via VBA (CLI: --input-dir, --cliente).
 """
 
 import re
 import sys
 import json
 import io
+import argparse
 from datetime import date, datetime
 from pathlib import Path
 from collections import defaultdict
@@ -19,30 +21,7 @@ try:
 except ImportError:
     sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
 
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-except ImportError:
-    tk = None
-
 X_DIV = 250  # divisão entre coluna esq e dir
-
-
-# ---------------------------------------------------------------------------
-# Seleção de pasta
-# ---------------------------------------------------------------------------
-
-def selecionar_pasta() -> Path:
-    if tk is None:
-        sys.exit("ERRO: tkinter não disponível.")
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    pasta = filedialog.askdirectory(title="Selecione a pasta com os PDFs do Santander")
-    root.destroy()
-    if not pasta:
-        sys.exit("Nenhuma pasta selecionada.")
-    return Path(pasta)
 
 
 # ---------------------------------------------------------------------------
@@ -218,16 +197,12 @@ def parsear_lancamentos(caminho: Path, vencimento: date) -> list:
 
                     tem_parcela = bool(parcela_str)
                     if tem_parcela:
-                        pa, pt    = map(int, parcela_str.split("/"))
-                        ano       = inferir_ano_parcelado(dia, mes, vencimento, pa)
-                        data_c    = f"{dia:02d}/{mes:02d}/{ano}"
-                        desc_f    = f"{descricao} Parcela {pa} de {pt} {data_c}"
+                        pa, pt  = map(int, parcela_str.split("/"))
+                        parcela = f"{pa:02d}/{pt:02d}"
                     else:
-                        ano       = inferir_ano_avista(dia, mes, vencimento)
-                        data_c    = f"{dia:02d}/{mes:02d}/{ano}"
-                        desc_f    = f"{descricao} {data_c}"
+                        parcela = None
 
-                    tipo        = classificar_tipo(desc_f, valor, tem_parcela)
+                    tipo        = classificar_tipo(descricao, valor, tem_parcela)
                     valor_final = abs(valor) if tipo in ("Pagamento", "Ajuste") else -abs(valor)
 
                     chave = (str(caminho), pg_idx, col, y)
@@ -236,12 +211,13 @@ def parsear_lancamentos(caminho: Path, vencimento: date) -> list:
                     vistos.add(chave)
 
                     lancamentos.append({
-                        "arquivo_origem":  str(caminho),
-                        "data_vencimento": vencimento.strftime("%Y-%m-%d"),
-                        "titular_cartao":  titular_atual,
-                        "descricao":       desc_f,
-                        "valor_brl":       valor_final,
-                        "tipo":            tipo,
+                        "arquivo":        caminho.name,
+                        "vencimento":     vencimento.strftime("%d/%m/%Y"),
+                        "descricao":      descricao,
+                        "parcela":        parcela,
+                        "valor":          valor_final,
+                        "tipo":           tipo,
+                        "titular_cartao": titular_atual,
                     })
 
     return lancamentos
@@ -257,7 +233,7 @@ def validar_total(lancamentos: list, texto: str):
         return False, 0.0, 0.0
     total_pdf  = float(m.group(1).replace(".", "").replace(",", "."))
     tipos_db   = {"Compra parcelada", "Compra à vista", "Outros"}
-    total_calc = sum(abs(l["valor_brl"]) for l in lancamentos if l["tipo"] in tipos_db)
+    total_calc = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_db)
     return abs(total_pdf - total_calc) < 0.10, total_pdf, total_calc
 
 
@@ -299,17 +275,52 @@ def processar_pasta(pasta: Path) -> list:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2:
-        pasta = Path(sys.argv[1])
-        if not pasta.exists():
-            print(f"ERRO: Pasta não encontrada: {pasta}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        pasta = selecionar_pasta()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-dir", required=True)
+    parser.add_argument("--cliente",   required=True)
+    parser.add_argument("--password",  default="")
+    args = parser.parse_args()
+
+    avisos     = []
+    input_path = Path(args.input_dir)
+
+    if not input_path.exists():
+        print(f"ERRO: Pasta não encontrada: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if input_path.name != args.cliente:
+        avisos.append(
+            f"AVISO: Nome da pasta ({input_path.name}) diverge do --cliente "
+            f"({args.cliente}). Verifique isolamento de dados."
+        )
+
+    ts      = datetime.now()
+    id_lote = f"SA-{ts.strftime('%Y%m%d-%H%M%S')}"
 
     try:
-        lancamentos = processar_pasta(pasta)
-        print(json.dumps({"lancamentos": lancamentos}, ensure_ascii=False))
+        lancamentos = processar_pasta(input_path)
+        envelope = {
+            "id_lote":            id_lote,
+            "data_processamento": ts.isoformat(timespec="seconds"),
+            "emissor":            "santander",
+            "cliente":            args.cliente,
+            "avisos":             avisos,
+            "lancamentos": [
+                {
+                    "cliente":        args.cliente,
+                    "id_lote":        id_lote,
+                    "arquivo":        l["arquivo"],
+                    "vencimento":     l["vencimento"],
+                    "descricao":      l["descricao"],
+                    "parcela":        l["parcela"],
+                    "valor":          l["valor"],
+                    "tipo":           l["tipo"],
+                    "titular_cartao": l["titular_cartao"],
+                }
+                for l in lancamentos
+            ],
+        }
+        print(json.dumps(envelope, ensure_ascii=False))
     except Exception as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)

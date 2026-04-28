@@ -1,13 +1,13 @@
 """
 Extrator de Fatura - Cartão de Crédito Mercado Pago
-Abre janela para seleção de pasta, processa PDFs e grava resultado em JSON.
-Chamado pelo Excel via VBA.
+Chamado pelo Excel via VBA (CLI: --input-dir, --cliente).
 """
 
 import re
 import sys
 import json
 import io
+import argparse
 from datetime import date, datetime
 from pathlib import Path
 
@@ -19,28 +19,6 @@ try:
 except ImportError:
     sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
 
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-except ImportError:
-    tk = None
-
-
-# ---------------------------------------------------------------------------
-# Seleção de pasta via janela
-# ---------------------------------------------------------------------------
-
-def selecionar_pasta() -> Path:
-    if tk is None:
-        sys.exit("ERRO: tkinter não disponível.")
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    pasta = filedialog.askdirectory(title="Selecione a pasta com os PDFs do Mercado Pago")
-    root.destroy()
-    if not pasta:
-        sys.exit("Nenhuma pasta selecionada.")
-    return Path(pasta)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +108,7 @@ KEYWORDS_PAGAMENTO = ["pagamento"]
 KEYWORDS_OUTROS    = ["iof", "juros", "multa"]
 
 
-def classificar_tipo(descricao: str) -> str:
+def classificar_tipo(descricao: str, tem_parcela: bool = False) -> str:
     desc_lower = descricao.lower()
     for kw in KEYWORDS_PAGAMENTO:
         if kw in desc_lower:
@@ -138,9 +116,7 @@ def classificar_tipo(descricao: str) -> str:
     for kw in KEYWORDS_OUTROS:
         if kw in desc_lower:
             return "Outros"
-    if RE_PARCELA.search(descricao):
-        return "Compra parcelada"
-    return "Compra à vista"
+    return "Compra parcelada" if tem_parcela else "Compra à vista"
 
 
 # ---------------------------------------------------------------------------
@@ -169,47 +145,24 @@ def parsear_lancamentos(texto: str, vencimento: date, caminho_pdf: Path) -> list
         dia, mes = map(int, data_str.split("/"))
         valor    = float(valor_str.replace(".", "").replace(",", "."))
 
-        # Inferência de ano e montagem de descrição final
         mp = RE_PARCELA.search(descricao)
         if mp:
             parcela_atual = int(mp.group(1))
             parcela_total = int(mp.group(2))
-
-            # Retrocede (parcela_atual - 1) meses
-            ano  = vencimento.year
-            mes_orig = vencimento.month - (parcela_atual - 1)
-            while mes_orig <= 0:
-                mes_orig += 12
-                ano      -= 1
-
-            # Se o mês calculado diverge do mês do PDF, usa mês do PDF e ajusta ano
-            if mes_orig % 12 == 0:
-                mes_ref = 12
-            else:
-                mes_ref = mes_orig % 12
-
-            if mes != mes_ref:
-                ano_final = ano if mes < mes_ref else ano - 1
-            else:
-                ano_final = ano
-
-            data_transacao = f"{dia:02d}/{mes:02d}/{ano_final}"
-            # Substitui "Parcela X de Y" por "Parcela X de Y DD/MM/AAAA"
-            desc_final = RE_PARCELA.sub(
-                f"Parcela {parcela_atual} de {parcela_total} {data_transacao}",
-                descricao,
-            ).strip()
+            parcela    = f"{parcela_atual:02d}/{parcela_total:02d}"
+            desc_clean = RE_PARCELA.sub("", descricao).strip()
+            tem_parcela = True
         else:
-            ano_final      = inferir_ano_avista(dia, mes, vencimento)
-            data_transacao = f"{dia:02d}/{mes:02d}/{ano_final}"
-            desc_final     = f"{descricao} {data_transacao}"
+            parcela    = None
+            desc_clean = descricao.strip()
+            tem_parcela = False
 
         chave = m.start()
         if chave in vistos:
             continue
         vistos.add(chave)
 
-        tipo_final = classificar_tipo(desc_final)
+        tipo_final = classificar_tipo(desc_clean, tem_parcela)
         # Créditos positivos, débitos negativos
         if tipo_final == "Pagamento":
             valor_final = valor
@@ -217,12 +170,13 @@ def parsear_lancamentos(texto: str, vencimento: date, caminho_pdf: Path) -> list
             valor_final = -valor
 
         lancamentos.append({
-            "arquivo_origem":  str(caminho_pdf),
-            "data_vencimento": vencimento.strftime("%Y-%m-%d"),
-            "descricao":       desc_final,
-            "valor_brl":       valor_final,
-            "tipo":            tipo_final,
-            "titular_cartao":  "",
+            "arquivo":        caminho_pdf.name,
+            "vencimento":     vencimento.strftime("%d/%m/%Y"),
+            "descricao":      desc_clean,
+            "parcela":        parcela,
+            "valor":          valor_final,
+            "tipo":           tipo_final,
+            "titular_cartao": "",
         })
 
     return lancamentos
@@ -239,7 +193,7 @@ def validar_total(lancamentos: list, texto: str):
     total_pdf  = float(m.group(1).replace(".", "").replace(",", "."))
     # Soma absoluta dos débitos para comparar com total do PDF
     tipos_debito = {"Compra parcelada", "Compra à vista", "Outros"}
-    total_calc = sum(abs(l["valor_brl"]) for l in lancamentos if l["tipo"] in tipos_debito)
+    total_calc = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito)
     return abs(total_pdf - total_calc) < 0.05, total_pdf, total_calc
 
 
@@ -285,18 +239,52 @@ def processar_pasta(pasta: Path) -> list:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Aceita pasta como argumento (chamada VBA) ou abre janela (execução direta)
-    if len(sys.argv) >= 2:
-        pasta = Path(sys.argv[1])
-        if not pasta.exists():
-            print(f"ERRO: Pasta não encontrada: {pasta}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        pasta = selecionar_pasta()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-dir", required=True)
+    parser.add_argument("--cliente",   required=True)
+    parser.add_argument("--password",  default="")
+    args = parser.parse_args()
+
+    avisos     = []
+    input_path = Path(args.input_dir)
+
+    if not input_path.exists():
+        print(f"ERRO: Pasta não encontrada: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if input_path.name != args.cliente:
+        avisos.append(
+            f"AVISO: Nome da pasta ({input_path.name}) diverge do --cliente "
+            f"({args.cliente}). Verifique isolamento de dados."
+        )
+
+    ts      = datetime.now()
+    id_lote = f"MP-{ts.strftime('%Y%m%d-%H%M%S')}"
 
     try:
-        lancamentos = processar_pasta(pasta)
-        print(json.dumps({"lancamentos": lancamentos}, ensure_ascii=False))
+        lancamentos = processar_pasta(input_path)
+        envelope = {
+            "id_lote":            id_lote,
+            "data_processamento": ts.isoformat(timespec="seconds"),
+            "emissor":            "mercadopago",
+            "cliente":            args.cliente,
+            "avisos":             avisos,
+            "lancamentos": [
+                {
+                    "cliente":        args.cliente,
+                    "id_lote":        id_lote,
+                    "arquivo":        l["arquivo"],
+                    "vencimento":     l["vencimento"],
+                    "descricao":      l["descricao"],
+                    "parcela":        l["parcela"],
+                    "valor":          l["valor"],
+                    "tipo":           l["tipo"],
+                    "titular_cartao": l["titular_cartao"],
+                }
+                for l in lancamentos
+            ],
+        }
+        print(json.dumps(envelope, ensure_ascii=False))
     except Exception as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
