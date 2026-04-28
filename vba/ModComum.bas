@@ -78,10 +78,36 @@ Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String, _
     End If
 
     ' -------------------------------------------------------------------------
-    ' Grava lançamentos — schema target
+    ' Migração automática de schema
+    ' A1 <> "Cliente" → renomeia aba legado, cria nova com cabeçalho
+    ' -------------------------------------------------------------------------
+    If wsDados.Cells(1, 1).Value <> "Cliente" Then
+        On Error Resume Next
+        wsDados.Name = "LctosTratados_legado"
+        On Error GoTo 0
+
+        Dim wsNova As Worksheet
+        Set wsNova = ThisWorkbook.Sheets.Add( _
+            After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsNova.Name = "LctosTratados"
+        wsNova.Cells(1, 1).Value = "Cliente"
+        wsNova.Cells(1, 2).Value = "ID_Lote"
+        wsNova.Cells(1, 3).Value = "Arquivo Origem"
+        wsNova.Cells(1, 4).Value = "Data Vencimento"
+        wsNova.Cells(1, 5).Value = "Descri" & Chr(231) & Chr(227) & "o"
+        wsNova.Cells(1, 6).Value = "Parcela"
+        wsNova.Cells(1, 7).Value = "Valor (R$)"
+        wsNova.Cells(1, 8).Value = "Tipo"
+        wsNova.Cells(1, 9).Value = "Titular - Cart" & Chr(227) & "o"
+        wsNova.Rows(1).Font.Bold = True
+        Set wsDados = wsNova
+    End If
+
+    ' -------------------------------------------------------------------------
+    ' APPEND acumulativo — nunca deletar linhas existentes
+    ' Rollback: deletar manualmente linhas onde Col B = id_lote indesejado
     ' Colunas: A=cliente  B=id_lote  C=arquivo  D=vencimento  E=descricao
     '          F=parcela  G=valor    H=tipo      I=titular_cartao
-    ' TASK-06 converterá este bloco para APPEND acumulativo com migração
     ' -------------------------------------------------------------------------
     Dim chaveArray As String
     Dim posArray   As Long
@@ -89,14 +115,12 @@ Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String, _
     Dim posEnd     As Long
     Dim objStr     As String
     Dim rowNum     As Long
+    Dim lastRow    As Long
 
-    ' Limpa dados anteriores (TASK-06 substituirá por APPEND com id_lote)
-    Dim lastRow As Long
-    lastRow = wsDados.Cells(wsDados.Rows.Count, 1).End(xlUp).Row
-    If lastRow > 1 Then wsDados.Rows("2:" & lastRow).Delete
+    lastRow = wsDados.Cells(wsDados.Rows.Count, "A").End(xlUp).Row + 1
 
     chaveArray = Chr(34) & "lancamentos" & Chr(34) & ": ["
-    rowNum   = 2
+    rowNum   = lastRow
     posArray = InStr(jsonStr, chaveArray)
     posStart = InStr(posArray, jsonStr, "{")
 
@@ -144,7 +168,7 @@ Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String, _
         posStart = InStr(posEnd, jsonStr, "{")
     Loop
 
-    MsgBox (rowNum - 2) & " lancamentos importados (" & nomeExtrator & ")", vbInformation
+    MsgBox (rowNum - lastRow) & " lancamentos importados (" & nomeExtrator & ")", vbInformation
 
     wsDados.Activate
     wsDados.Cells(2, 1).Select
