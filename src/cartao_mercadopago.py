@@ -19,15 +19,17 @@ try:
 except ImportError:
     sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
 
+from pdf_decrypt import descriptografar
+
 
 
 # ---------------------------------------------------------------------------
 # Extração de texto do PDF
 # ---------------------------------------------------------------------------
 
-def extrair_texto_pdf(caminho_pdf: Path) -> str:
+def extrair_texto_pdf(source) -> str:
     texto = []
-    with pdfplumber.open(str(caminho_pdf)) as pdf:
+    with pdfplumber.open(source) as pdf:
         for page in pdf.pages:
             t = page.extract_text()
             if t:
@@ -201,7 +203,7 @@ def validar_total(lancamentos: list, texto: str):
 # Processar pasta
 # ---------------------------------------------------------------------------
 
-def processar_pasta(pasta: Path) -> list:
+def processar_pasta(pasta: Path, password: str = "") -> list:
     pdfs_vistos = {}
     for p in pasta.glob("*"):
         if p.suffix.lower() == ".pdf":
@@ -215,7 +217,8 @@ def processar_pasta(pasta: Path) -> list:
     todos_lancamentos = []
 
     for pdf_path in pdfs:
-        texto          = extrair_texto_pdf(pdf_path)
+        source         = descriptografar(pdf_path, password)
+        texto          = extrair_texto_pdf(source)
         venc           = extrair_vencimento(texto)
         titular_cartao = extrair_titular_cartao(texto)
         lancamentos    = parsear_lancamentos(texto, venc, pdf_path)
@@ -262,7 +265,7 @@ if __name__ == "__main__":
     id_lote = f"MP-{ts.strftime('%Y%m%d-%H%M%S')}"
 
     try:
-        lancamentos = processar_pasta(input_path)
+        lancamentos = processar_pasta(input_path, args.password)
         envelope = {
             "id_lote":            id_lote,
             "data_processamento": ts.isoformat(timespec="seconds"),

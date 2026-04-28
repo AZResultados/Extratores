@@ -21,6 +21,8 @@ try:
 except ImportError:
     sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
 
+from pdf_decrypt import descriptografar
+
 X_DIV = 250  # divisão entre coluna esq e dir
 
 
@@ -238,21 +240,6 @@ def validar_total(lancamentos: list, texto: str):
 
 
 # ---------------------------------------------------------------------------
-# Descriptografia in-memory (BR-06)
-# ---------------------------------------------------------------------------
-
-def _descriptografar(pdf_path: Path, password: str):
-    if not password:
-        return pdf_path
-    import pikepdf
-    with pikepdf.open(pdf_path, password=password) as pdf:
-        buf = io.BytesIO()
-        pdf.save(buf)
-        buf.seek(0)
-    return buf
-
-
-# ---------------------------------------------------------------------------
 # Processar pasta
 # ---------------------------------------------------------------------------
 
@@ -269,7 +256,7 @@ def processar_pasta(pasta: Path, password: str = "") -> list:
     todos = []
 
     for pdf_path in pdfs:
-        source      = _descriptografar(pdf_path, password)
+        source      = descriptografar(pdf_path, password)
         texto       = extrair_texto_pdf(source)
         if isinstance(source, io.BytesIO):
             source.seek(0)
