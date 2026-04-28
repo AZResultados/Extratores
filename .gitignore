@@ -3,4 +3,5 @@ output/
 __pycache__/
 *.pyc
 *.pyo
+.claude/
 C:\Temp\extratores_output.json

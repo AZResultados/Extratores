@@ -14,7 +14,7 @@ from datetime import date, datetime
 from pathlib import Path
 from collections import defaultdict
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 
 try:
     import pdfplumber
@@ -243,6 +243,24 @@ def validar_total(lancamentos: list, texto: str):
 # Processar pasta
 # ---------------------------------------------------------------------------
 
+def processar_arquivo(pdf_path: Path, source) -> list:
+    """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
+    texto = extrair_texto_pdf(source)
+    if isinstance(source, io.BytesIO):
+        source.seek(0)
+    venc        = extrair_vencimento(texto)
+    lancamentos = parsear_lancamentos(pdf_path, venc, source)
+    ok, total_pdf, total_calc = validar_total(lancamentos, texto)
+    if not ok:
+        raise ValueError(
+            f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
+            f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
+        )
+    for l in lancamentos:
+        l["emissor"] = "santander"
+    return lancamentos
+
+
 def processar_pasta(pasta: Path, password: str = "") -> list:
     pdfs_vistos = {}
     for p in pasta.glob("*"):
@@ -254,23 +272,9 @@ def processar_pasta(pasta: Path, password: str = "") -> list:
         raise FileNotFoundError("Nenhum PDF encontrado na pasta.")
 
     todos = []
-
     for pdf_path in pdfs:
-        source      = descriptografar(pdf_path, password)
-        texto       = extrair_texto_pdf(source)
-        if isinstance(source, io.BytesIO):
-            source.seek(0)
-        venc        = extrair_vencimento(texto)
-        lancamentos = parsear_lancamentos(pdf_path, venc, source)
-        ok, total_pdf, total_calc = validar_total(lancamentos, texto)
-
-        if not ok:
-            raise ValueError(
-                f"{pdf_path.name}: divergência R$ {abs(total_pdf - total_calc):.2f} "
-                f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
-            )
-
-        todos.extend(lancamentos)
+        source = descriptografar(pdf_path, password)
+        todos.extend(processar_arquivo(pdf_path, source))
 
     return todos
 
@@ -285,6 +289,13 @@ if __name__ == "__main__":
     parser.add_argument("--cliente",   required=True)
     parser.add_argument("--password",  default="")
     args = parser.parse_args()
+
+    # Standalone: usa --password ou stdin. Producao: extrator.py gerencia senha via router.
+    password = args.password
+    if not sys.stdin.isatty():
+        linha = sys.stdin.readline().strip()
+        if linha:
+            password = linha
 
     avisos     = []
     input_path = Path(args.input_dir)
@@ -303,7 +314,7 @@ if __name__ == "__main__":
     id_lote = f"SA-{ts.strftime('%Y%m%d-%H%M%S')}"
 
     try:
-        lancamentos = processar_pasta(input_path, args.password)
+        lancamentos = processar_pasta(input_path, password)
         envelope = {
             "id_lote":            id_lote,
             "data_processamento": ts.isoformat(timespec="seconds"),

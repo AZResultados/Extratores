@@ -6,13 +6,11 @@ Chamado pelo Excel via VBA (CLI: --input-dir, --cliente).
 import re
 import sys
 import json
-import io
 import argparse
 from datetime import date, datetime
 from pathlib import Path
 
-# Força UTF-8 no stdout (evita CP850/CP1252 no cmd do Windows)
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 
 try:
     import pdfplumber
@@ -203,6 +201,24 @@ def validar_total(lancamentos: list, texto: str):
 # Processar pasta
 # ---------------------------------------------------------------------------
 
+def processar_arquivo(pdf_path: Path, source) -> list:
+    """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
+    texto          = extrair_texto_pdf(source)
+    venc           = extrair_vencimento(texto)
+    titular_cartao = extrair_titular_cartao(texto)
+    lancamentos    = parsear_lancamentos(texto, venc, pdf_path)
+    ok, total_pdf, total_calc = validar_total(lancamentos, texto)
+    if not ok:
+        raise ValueError(
+            f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
+            f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
+        )
+    for l in lancamentos:
+        l["titular_cartao"] = titular_cartao
+        l["emissor"]        = "mercadopago"
+    return lancamentos
+
+
 def processar_pasta(pasta: Path, password: str = "") -> list:
     pdfs_vistos = {}
     for p in pasta.glob("*"):
@@ -215,24 +231,9 @@ def processar_pasta(pasta: Path, password: str = "") -> list:
         raise FileNotFoundError("Nenhum PDF encontrado na pasta.")
 
     todos_lancamentos = []
-
     for pdf_path in pdfs:
-        source         = descriptografar(pdf_path, password)
-        texto          = extrair_texto_pdf(source)
-        venc           = extrair_vencimento(texto)
-        titular_cartao = extrair_titular_cartao(texto)
-        lancamentos    = parsear_lancamentos(texto, venc, pdf_path)
-        ok, total_pdf, total_calc = validar_total(lancamentos, texto)
-
-        if not ok:
-            raise ValueError(
-                f"{pdf_path.name}: divergência R$ {abs(total_pdf - total_calc):.2f} "
-                f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
-            )
-
-        for l in lancamentos:
-            l["titular_cartao"] = titular_cartao
-        todos_lancamentos.extend(lancamentos)
+        source = descriptografar(pdf_path, password)
+        todos_lancamentos.extend(processar_arquivo(pdf_path, source))
 
     return todos_lancamentos
 
@@ -247,6 +248,13 @@ if __name__ == "__main__":
     parser.add_argument("--cliente",   required=True)
     parser.add_argument("--password",  default="")
     args = parser.parse_args()
+
+    # Standalone: usa --password ou stdin. Producao: extrator.py gerencia senha via router.
+    password = args.password
+    if not sys.stdin.isatty():
+        linha = sys.stdin.readline().strip()
+        if linha:
+            password = linha
 
     avisos     = []
     input_path = Path(args.input_dir)
@@ -265,7 +273,7 @@ if __name__ == "__main__":
     id_lote = f"MP-{ts.strftime('%Y%m%d-%H%M%S')}"
 
     try:
-        lancamentos = processar_pasta(input_path, args.password)
+        lancamentos = processar_pasta(input_path, password)
         envelope = {
             "id_lote":            id_lote,
             "data_processamento": ts.isoformat(timespec="seconds"),

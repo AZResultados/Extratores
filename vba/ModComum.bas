@@ -1,91 +1,65 @@
 Attribute VB_Name = "ModComum"
 ' =============================================================================
-' ModComum - Funções compartilhadas entre todos os extratores
+' ModComum - Processamento central + utilitarios compartilhados
+' Caminhos via ModConfig — sem dependencia de aba Config
 ' =============================================================================
-' Config layout esperado:
-'   B1 = caminho pythonExe
-'   B2 = caminho script Mercado Pago
-'   B3 = caminho script Santander
-'   B4 = nomeCliente  (ex: "JW")
-'   B5 = inputDir Mercado Pago
-'   B6 = inputDir Santander
-' Senhas layout esperado:
-'   B1 = senha Santander (CPF/CNPJ do titular) — em branco se não criptografado
 
-Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String, _
-                      nomeCliente As String, inputDir As String, _
-                      Optional senha As String = "")
+Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
 
-    Dim wsConfig   As Worksheet
-    Dim wsDados    As Worksheet
-    Dim pythonExe  As String
-    Dim scriptPath As String
-    Dim cmd        As String
-    Dim jsonStr    As String
-    Dim errStr     As String
+    Dim cmd     As String
+    Dim jsonStr As String
+    Dim errStr  As String
 
-    Set wsConfig = ThisWorkbook.Sheets("Config")
-    Set wsDados  = ThisWorkbook.Sheets("LctosTratados")
+    Dim wsDados As Worksheet
+    Set wsDados = ThisWorkbook.Sheets("LctosTratados")
 
-    pythonExe  = wsConfig.Range("B1").Value
-    scriptPath = wsConfig.Range(celulaScript).Value
-
-    ' -------------------------------------------------------------------------
-    ' Monta comando CLI (BR-02)
-    ' -------------------------------------------------------------------------
     cmd = "cmd /c chcp 65001 > nul && " & _
-          Chr(34) & pythonExe  & Chr(34) & " " & _
-          Chr(34) & scriptPath & Chr(34) & _
+          Chr(34) & PythonExe()      & Chr(34) & " " & _
+          Chr(34) & ExtratorScript() & Chr(34) & _
           " --cliente "   & Chr(34) & nomeCliente & Chr(34) & _
           " --input-dir " & Chr(34) & inputDir    & Chr(34)
 
-    If Len(Trim(senha)) > 0 Then
-        cmd = cmd & " --password " & Chr(34) & senha & Chr(34)
-    End If
-
-    ' -------------------------------------------------------------------------
-    ' Exec() — captura stdout/stderr, zero arquivo temporário (BR-06)
-    ' ORDEM OBRIGATÓRIA: StdOut.ReadAll antes de ExitCode (previne deadlock pipe)
-    ' -------------------------------------------------------------------------
-    Dim oShell As Object
-    Dim oExec  As Object
+    Dim oShell As Object, oExec As Object
     Set oShell = CreateObject("WScript.Shell")
     Set oExec  = oShell.Exec(cmd)
+
+    oExec.StdIn.Close
 
     jsonStr = oExec.StdOut.ReadAll
     errStr  = oExec.StdErr.ReadAll
 
-    ' -------------------------------------------------------------------------
-    ' Fail-fast (BR-03): ExitCode <> 0 → aborta, zero gravação
-    ' -------------------------------------------------------------------------
     If oExec.ExitCode <> 0 Then
-        MsgBox "ERRO ao executar " & nomeExtrator & ":" & vbCrLf & errStr, vbCritical
+        MsgBox "ERRO ao processar " & nomeCliente & ":" & vbCrLf & errStr, vbCritical
         Exit Sub
     End If
 
-    ' ExitCode = 0 com stderr não-vazio → aviso técnico (não aborta)
     If Len(Trim(errStr)) > 0 Then
-        MsgBox "Aviso técnico (" & nomeExtrator & "):" & vbCrLf & errStr, vbExclamation
+        MsgBox "Aviso tecnico:" & vbCrLf & errStr, vbExclamation
     End If
 
-    ' -------------------------------------------------------------------------
-    ' Verifica avisos do envelope (não-fatais)
-    ' -------------------------------------------------------------------------
-    Dim avisosStr As String
-    avisosStr = ExtrairArray(jsonStr, "avisos")
-    If Len(avisosStr) > 2 Then
-        MsgBox "Avisos (" & nomeExtrator & "):" & vbCrLf & avisosStr, vbExclamation
+    Dim sc As Object
+    Set sc = CreateObject("MSScriptControl.ScriptControl")
+    sc.Language = "JScript"
+
+    On Error GoTo ErroParse
+    sc.ExecuteStatement "var env = " & jsonStr
+    On Error GoTo 0
+
+    Dim avisosLen As Long
+    Dim avisosMsg As String
+    Dim j         As Long
+    avisosLen = sc.Eval("env.avisos.length")
+    If avisosLen > 0 Then
+        For j = 0 To avisosLen - 1
+            avisosMsg = avisosMsg & sc.Eval("env.avisos[" & j & "]") & vbCrLf
+        Next j
+        MsgBox "Avisos:" & vbCrLf & avisosMsg, vbExclamation
     End If
 
-    ' -------------------------------------------------------------------------
-    ' Migração automática de schema
-    ' A1 <> "Cliente" → renomeia aba legado, cria nova com cabeçalho
-    ' -------------------------------------------------------------------------
     If wsDados.Cells(1, 1).Value <> "Cliente" Then
         On Error Resume Next
         wsDados.Name = "LctosTratados_legado"
         On Error GoTo 0
-
         Dim wsNova As Worksheet
         Set wsNova = ThisWorkbook.Sheets.Add( _
             After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
@@ -103,116 +77,148 @@ Sub ProcessarExtrator(celulaScript As String, nomeExtrator As String, _
         Set wsDados = wsNova
     End If
 
-    ' -------------------------------------------------------------------------
-    ' APPEND acumulativo — nunca deletar linhas existentes
-    ' Rollback: deletar manualmente linhas onde Col B = id_lote indesejado
-    ' Colunas: A=cliente  B=id_lote  C=arquivo  D=vencimento  E=descricao
-    '          F=parcela  G=valor    H=tipo      I=titular_cartao
-    ' -------------------------------------------------------------------------
-    Dim chaveArray As String
-    Dim posArray   As Long
-    Dim posStart   As Long
-    Dim posEnd     As Long
-    Dim objStr     As String
-    Dim rowNum     As Long
-    Dim lastRow    As Long
+    Dim total   As Long
+    Dim rowNum  As Long
+    Dim lastRow As Long
+    Dim i       As Long
+    Dim prefix  As String
 
     lastRow = wsDados.Cells(wsDados.Rows.Count, "A").End(xlUp).Row + 1
+    rowNum  = lastRow
+    total   = sc.Eval("env.lancamentos.length")
 
-    chaveArray = Chr(34) & "lancamentos" & Chr(34) & ": ["
-    rowNum   = lastRow
-    posArray = InStr(jsonStr, chaveArray)
-    posStart = InStr(posArray, jsonStr, "{")
-
-    Do While posStart > 0
-        posEnd = InStr(posStart, jsonStr, "}")
-        If posEnd = 0 Then Exit Do
-
-        objStr = Mid(jsonStr, posStart, posEnd - posStart + 1)
-
-        Dim fCliente As String
-        Dim fIdLote  As String
-        Dim fArquivo As String
-        Dim fVenc    As String
-        Dim fDesc    As String
-        Dim fParcela As String
-        Dim fValor   As String
-        Dim fTipo    As String
-        Dim fTitular As String
-
-        fCliente = ExtrairCampo(objStr, "cliente")
-        fIdLote  = ExtrairCampo(objStr, "id_lote")
-        fArquivo = ExtrairCampo(objStr, "arquivo")
-        fVenc    = ExtrairCampo(objStr, "vencimento")
-        fDesc    = ExtrairCampo(objStr, "descricao")
-        fParcela = ExtrairCampo(objStr, "parcela")
-        fValor   = ExtrairCampo(objStr, "valor")
-        fTipo    = ExtrairCampo(objStr, "tipo")
-        fTitular = ExtrairCampo(objStr, "titular_cartao")
-
+    For i = 0 To total - 1
+        prefix = "env.lancamentos[" & i & "]."
         With wsDados
-            .Cells(rowNum, 1).Value = fCliente
-            .Cells(rowNum, 2).Value = fIdLote
-            .Cells(rowNum, 3).Value = fArquivo
-            .Cells(rowNum, 4).Value = CDate(fVenc)
+            .Cells(rowNum, 1).Value = sc.Eval(prefix & "cliente")
+            .Cells(rowNum, 2).Value = sc.Eval(prefix & "id_lote")
+            .Cells(rowNum, 3).Value = sc.Eval(prefix & "arquivo")
+            .Cells(rowNum, 4).Value = CDate(sc.Eval(prefix & "vencimento"))
             .Cells(rowNum, 4).NumberFormat = "dd/mm/yyyy"
-            .Cells(rowNum, 5).Value = fDesc
-            .Cells(rowNum, 6).Value = fParcela
-            .Cells(rowNum, 7).Value = CDbl(Replace(fValor, ".", ","))
+            .Cells(rowNum, 5).Value = sc.Eval(prefix & "descricao")
+            .Cells(rowNum, 6).Value = sc.Eval("env.lancamentos[" & i & "].parcela || ''")
+            .Cells(rowNum, 7).Value = CDbl(sc.Eval(prefix & "valor"))
             .Cells(rowNum, 7).NumberFormat = "#,##0.00"
-            .Cells(rowNum, 8).Value = fTipo
-            .Cells(rowNum, 9).Value = fTitular
+            .Cells(rowNum, 8).Value = sc.Eval(prefix & "tipo")
+            .Cells(rowNum, 9).Value = sc.Eval(prefix & "titular_cartao")
         End With
+        rowNum = rowNum + 1
+    Next i
 
-        rowNum   = rowNum + 1
-        posStart = InStr(posEnd, jsonStr, "{")
-    Loop
-
-    MsgBox (rowNum - lastRow) & " lancamentos importados (" & nomeExtrator & ")", vbInformation
-
+    MsgBox (rowNum - lastRow) & " lancamentos importados para " & nomeCliente, vbInformation
     wsDados.Activate
     wsDados.Cells(2, 1).Select
+    Exit Sub
 
+ErroParse:
+    MsgBox "ERRO: JSON invalido recebido do Python." & vbCrLf & _
+           "Primeiros 200 chars: " & Left(jsonStr, 200), vbCritical
 End Sub
 
 
-Function ExtrairCampo(jsonObj As String, campo As String) As String
-    Dim chave  As String
-    Dim pos    As Long
-    Dim posVal As Long
-    Dim posEnd As Long
+' =============================================================================
+' Utilitarios compartilhados
+' =============================================================================
 
-    chave = Chr(34) & campo & Chr(34) & ":"
-    pos = InStr(jsonObj, chave)
-    If pos = 0 Then ExtrairCampo = "": Exit Function
+Function ObterListaClientes() As String()
+    Dim oShell As Object, oExec As Object
+    Set oShell = CreateObject("WScript.Shell")
+    Set oExec = oShell.Exec("cmd /c chcp 65001 > nul && " & _
+                Chr(34) & PythonExe() & Chr(34) & " " & _
+                Chr(34) & SetupClienteScript() & Chr(34) & " list")
+    oExec.StdIn.Close
 
-    posVal = pos + Len(chave)
-    Do While Mid(jsonObj, posVal, 1) = " "
-        posVal = posVal + 1
-    Loop
+    Dim saida As String
+    saida = Replace(Trim(oExec.StdOut.ReadAll), vbCr, "")
 
-    If Mid(jsonObj, posVal, 1) = Chr(34) Then
-        posVal = posVal + 1
-        posEnd = InStr(posVal, jsonObj, Chr(34))
-        ExtrairCampo = Replace(Mid(jsonObj, posVal, posEnd - posVal), "\\", "\")
-    Else
-        posEnd = posVal
-        Do While Mid(jsonObj, posEnd, 1) Like "[0-9.\\-]"
-            posEnd = posEnd + 1
-        Loop
-        ExtrairCampo = Mid(jsonObj, posVal, posEnd - posVal)
+    Dim vazio(0) As String
+    vazio(0) = ""
+
+    If saida = "" Or saida = "VAZIO" Then
+        ObterListaClientes = vazio
+        Exit Function
     End If
+
+    Dim linhas() As String
+    linhas = Split(saida, vbLf)
+
+    Dim validos() As String
+    ReDim validos(UBound(linhas))
+    Dim n As Integer, k As Integer
+    n = 0
+    For k = 0 To UBound(linhas)
+        If Trim(linhas(k)) <> "" And Trim(linhas(k)) <> "VAZIO" Then
+            validos(n) = Trim(linhas(k))
+            n = n + 1
+        End If
+    Next k
+
+    If n = 0 Then
+        ObterListaClientes = vazio
+        Exit Function
+    End If
+
+    ReDim Preserve validos(n - 1)
+    ObterListaClientes = validos
 End Function
 
 
-Function ExtrairArray(jsonStr As String, campo As String) As String
-    Dim chave  As String
-    Dim pos    As Long
-    Dim posEnd As Long
-    chave = Chr(34) & campo & Chr(34) & ": ["
-    pos = InStr(jsonStr, chave)
-    If pos = 0 Then ExtrairArray = "[]": Exit Function
-    pos = InStr(pos, jsonStr, "[")
-    posEnd = InStr(pos, jsonStr, "]")
-    ExtrairArray = Mid(jsonStr, pos, posEnd - pos + 1)
+Function SelecionarCliente(ByRef outBaseDir As String) As String
+    SelecionarCliente = ""
+    outBaseDir = ""
+
+    Dim clientes() As String
+    clientes = ObterListaClientes()
+
+    If clientes(0) = "" Then
+        MsgBox "Nenhum cliente cadastrado." & vbCrLf & _
+               "Use o botao 'Cadastrar Cliente' primeiro.", vbExclamation
+        Exit Function
+    End If
+
+    Dim lista As String
+    Dim i As Integer
+    For i = 0 To UBound(clientes)
+        Dim p() As String
+        p = Split(clientes(i), "|")
+        lista = lista & "  " & (i + 1) & ". " & p(0) & vbCrLf
+    Next i
+
+    Dim escolha As String
+    escolha = InputBox("Clientes cadastrados:" & vbCrLf & vbCrLf & _
+                       lista & vbCrLf & "Digite o numero:", "Selecionar Cliente")
+
+    If Trim(escolha) = "" Then Exit Function
+    If Not IsNumeric(escolha) Then
+        MsgBox "Entrada invalida.", vbExclamation
+        Exit Function
+    End If
+
+    Dim idx As Integer
+    idx = CInt(escolha) - 1
+    If idx < 0 Or idx > UBound(clientes) Then
+        MsgBox "Numero fora do intervalo.", vbExclamation
+        Exit Function
+    End If
+
+    Dim sel() As String
+    sel = Split(clientes(idx), "|")
+    SelecionarCliente = sel(0)
+    If UBound(sel) >= 1 Then outBaseDir = sel(1)
+End Function
+
+
+Function SelecionarPasta(titulo As String, Optional startPath As String = "") As String
+    SelecionarPasta = ""
+    Dim oShell As Object
+    Set oShell = CreateObject("Shell.Application")
+    Dim oFolder As Object
+    If startPath <> "" Then
+        Set oFolder = oShell.BrowseForFolder(0, titulo, 0, startPath)
+    Else
+        Set oFolder = oShell.BrowseForFolder(0, titulo, 0)
+    End If
+    If Not oFolder Is Nothing Then
+        SelecionarPasta = oFolder.Self.Path
+    End If
 End Function
