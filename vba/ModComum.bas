@@ -11,7 +11,6 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
     Dim errStr  As String
 
     Dim wsDados As Worksheet
-    Set wsDados = ThisWorkbook.Sheets("LctosTratados")
 
     cmd = "cmd /c chcp 65001 > nul && " & _
           Chr(34) & PythonExe()      & Chr(34) & " " & _
@@ -56,25 +55,25 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
         MsgBox "Avisos:" & vbCrLf & avisosMsg, vbExclamation
     End If
 
-    If wsDados.Cells(1, 1).Value <> "Cliente" Then
+    On Error Resume Next
+    Set wsDados = ThisWorkbook.Sheets("LctosTratados")
+    On Error GoTo 0
+
+    If wsDados Is Nothing Then
+        ' Primeira execucao: aba ainda nao existe
+        Set wsDados = ThisWorkbook.Sheets.Add( _
+            After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsDados.Name = "LctosTratados"
+        Call _CriarCabecalho(wsDados)
+    ElseIf wsDados.Cells(1, 1).Value <> "Cliente" Then
+        ' Aba existe mas com schema antigo: preserva como legado
         On Error Resume Next
         wsDados.Name = "LctosTratados_legado"
         On Error GoTo 0
-        Dim wsNova As Worksheet
-        Set wsNova = ThisWorkbook.Sheets.Add( _
+        Set wsDados = ThisWorkbook.Sheets.Add( _
             After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-        wsNova.Name = "LctosTratados"
-        wsNova.Cells(1, 1).Value = "Cliente"
-        wsNova.Cells(1, 2).Value = "ID_Lote"
-        wsNova.Cells(1, 3).Value = "Arquivo Origem"
-        wsNova.Cells(1, 4).Value = "Data Vencimento"
-        wsNova.Cells(1, 5).Value = "Descri" & Chr(231) & Chr(227) & "o"
-        wsNova.Cells(1, 6).Value = "Parcela"
-        wsNova.Cells(1, 7).Value = "Valor (R$)"
-        wsNova.Cells(1, 8).Value = "Tipo"
-        wsNova.Cells(1, 9).Value = "Titular - Cart" & Chr(227) & "o"
-        wsNova.Rows(1).Font.Bold = True
-        Set wsDados = wsNova
+        wsDados.Name = "LctosTratados"
+        Call _CriarCabecalho(wsDados)
     End If
 
     Dim total   As Long
@@ -206,6 +205,20 @@ Function SelecionarCliente(ByRef outBaseDir As String) As String
     SelecionarCliente = sel(0)
     If UBound(sel) >= 1 Then outBaseDir = sel(1)
 End Function
+
+
+Private Sub _CriarCabecalho(ws As Worksheet)
+    ws.Cells(1, 1).Value = "Cliente"
+    ws.Cells(1, 2).Value = "ID_Lote"
+    ws.Cells(1, 3).Value = "Arquivo Origem"
+    ws.Cells(1, 4).Value = "Data Vencimento"
+    ws.Cells(1, 5).Value = "Descri" & Chr(231) & Chr(227) & "o"
+    ws.Cells(1, 6).Value = "Parcela"
+    ws.Cells(1, 7).Value = "Valor (R$)"
+    ws.Cells(1, 8).Value = "Tipo"
+    ws.Cells(1, 9).Value = "Titular - Cart" & Chr(227) & "o"
+    ws.Rows(1).Font.Bold = True
+End Sub
 
 
 Function SelecionarPasta(titulo As String, Optional startPath As String = "") As String
