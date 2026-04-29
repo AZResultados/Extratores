@@ -100,7 +100,7 @@ def main(args=None):
             for l in todos_lancamentos
         ],
     }
-    print(json.dumps(envelope, ensure_ascii=False))
+    sys.stdout.write(json.dumps(envelope, ensure_ascii=True))
 
 
 if __name__ == "__main__":
