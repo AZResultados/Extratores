@@ -65,6 +65,7 @@ def listar_clientes() -> list:
 
 
 def remover_cliente(nome: str):
+    _garantir_schema()
     with _conectar() as conn:
         conn.execute("DELETE FROM clientes WHERE nome=?", (nome,))
     log.info("Cliente removido | nome=%s", nome)

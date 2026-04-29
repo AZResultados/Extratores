@@ -73,6 +73,7 @@ def get_todas_senhas(cliente: str) -> list:
 
 def remover_senha(cliente: str, senha: str):
     """Remove uma senha especifica do cliente."""
+    _garantir_schema()
     with _conectar() as conn:
         conn.execute(
             "DELETE FROM senhas_pdf WHERE cliente=? AND senha=?",

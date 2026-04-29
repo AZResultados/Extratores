@@ -30,11 +30,11 @@ PREFIXOS_LOTE = {
 }
 
 
-if __name__ == "__main__":
+def main(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", required=True)
     parser.add_argument("--cliente",   required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     log.info("Iniciando | cliente=%s | pasta=%s", args.cliente, args.input_dir)
 
@@ -45,7 +45,6 @@ if __name__ == "__main__":
         print(f"ERRO: Pasta nao encontrada: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Verifica se o nome do cliente aparece em algum nivel do caminho
     partes_caminho = [p.name for p in input_path.parents] + [input_path.name]
     if args.cliente not in partes_caminho:
         avisos.append(
@@ -102,3 +101,7 @@ if __name__ == "__main__":
         ],
     }
     print(json.dumps(envelope, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
