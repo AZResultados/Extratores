@@ -5,3 +5,5 @@ __pycache__/
 *.pyo
 .claude/
 C:\Temp\extratores_output.json
+**/inativos/
+**/Inativos/
