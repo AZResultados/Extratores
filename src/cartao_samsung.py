@@ -250,3 +250,19 @@ def parsear_lancamentos(caminho: Path, vencimento: date, titular: str, final_car
                     })
 
     return lancamentos
+
+
+# ---------------------------------------------------------------------------
+# Validação de total
+# ---------------------------------------------------------------------------
+
+def validar_total(lancamentos: list, texto: str):
+    m = re.search(r"Total dos lançamentos atuais\s+([\d.]+,\d{2})", texto)
+    if not m:
+        m = re.search(r"Lançamentos no cartão\s+([\d.]+,\d{2})", texto)
+    if not m:
+        return False, 0.0, 0.0
+    total_pdf   = float(m.group(1).replace(".", "").replace(",", "."))
+    tipos_debito = {"Compra parcelada", "Compra à vista", "Outros"}
+    total_calc  = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito)
+    return abs(total_pdf - total_calc) < 0.10, total_pdf, total_calc
