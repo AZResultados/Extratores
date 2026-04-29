@@ -264,10 +264,19 @@ def validar_total(lancamentos: list, texto: str):
         m = re.search(r"Lançamentos no cartão\s+([\d.]+,\d{2})", texto)
     if not m:
         return False, 0.0, 0.0
-    total_pdf   = float(m.group(1).replace(".", "").replace(",", "."))
+    total_pdf = float(m.group(1).replace(".", "").replace(",", "."))
+
+    # Encargos (atraso de pagamento): listados como transações mas excluídos do label
+    m_enc = re.search(r"Encargos\s*\([^)]+\)\s+([\d.]+,\d{2})", texto)
+    encargos = float(m_enc.group(1).replace(".", "").replace(",", ".")) if m_enc else 0.0
+
+    # Repasse de IOF (transação internacional): incluso no label mas sem data → não parseado
+    m_iof = re.search(r"Repasse de IOF em R\$\s+([\d.]+,\d{2})", texto)
+    repasse_iof = float(m_iof.group(1).replace(".", "").replace(",", ".")) if m_iof else 0.0
+
     tipos_debito = {"Compra parcelada", "Compra à vista", "Outros"}
-    total_calc  = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito)
-    return abs(total_pdf - total_calc) < 0.10, total_pdf, total_calc
+    total_calc = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito) + repasse_iof
+    return abs((total_pdf + encargos) - total_calc) < 0.10, total_pdf, total_calc
 
 
 # ---------------------------------------------------------------------------
