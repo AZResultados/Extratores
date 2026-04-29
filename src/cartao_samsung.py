@@ -69,3 +69,28 @@ def extrair_titular(texto: str) -> tuple:
         final_cartao = m2.group(1)
 
     return nome, final_cartao
+
+
+# ---------------------------------------------------------------------------
+# Extração de segmento (uma coluna de uma página)
+# ---------------------------------------------------------------------------
+
+def extrair_segmento(page, col: str) -> list:
+    words = page.extract_words(keep_blank_chars=False, x_tolerance=3, y_tolerance=3)
+
+    if col == "e":
+        words_col = [w for w in words if w["x0"] < X_DIV]
+    else:
+        words_col = [w for w in words if w["x0"] >= X_DIV]
+
+    linhas_dict = defaultdict(list)
+    for w in words_col:
+        y = round(w["top"] / 4) * 4
+        linhas_dict[y].append(w)
+
+    resultado = []
+    for y in sorted(linhas_dict.keys()):
+        tokens = [w["text"] for w in sorted(linhas_dict[y], key=lambda w: w["x0"])]
+        resultado.append((y, tokens))
+
+    return resultado
