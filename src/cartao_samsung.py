@@ -8,6 +8,8 @@ Chamado pelo Excel via VBA (CLI: --input-dir, --cliente).
 import re
 import sys
 import io
+import json
+import argparse
 from datetime import date, datetime
 from pathlib import Path
 from collections import defaultdict
@@ -266,3 +268,113 @@ def validar_total(lancamentos: list, texto: str):
     tipos_debito = {"Compra parcelada", "Compra à vista", "Outros"}
     total_calc  = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito)
     return abs(total_pdf - total_calc) < 0.10, total_pdf, total_calc
+
+
+# ---------------------------------------------------------------------------
+# Processar arquivo / pasta
+# ---------------------------------------------------------------------------
+
+def processar_arquivo(pdf_path: Path, source) -> list:
+    """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
+    log.info("Iniciando extracao | arquivo=%s", pdf_path.name)
+    texto = extrair_texto_pdf(source)
+    if isinstance(source, io.BytesIO):
+        source.seek(0)
+    venc           = extrair_vencimento(texto)
+    titular, final = extrair_titular(texto)
+    lancamentos    = parsear_lancamentos(pdf_path, venc, titular, final, source)
+    ok, total_pdf, total_calc = validar_total(lancamentos, texto)
+    if not ok:
+        log.error("Divergencia de validacao | arquivo=%s | pdf=%.2f | calc=%.2f | diff=%.2f",
+                  pdf_path.name, total_pdf, total_calc, abs(total_pdf - total_calc))
+        raise ValueError(
+            f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
+            f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
+        )
+    log.info("Extracao OK | arquivo=%s | lancamentos=%d | total=%.2f",
+             pdf_path.name, len(lancamentos), total_pdf)
+    return lancamentos
+
+
+def processar_pasta(pasta: Path, password: str = "") -> list:
+    pdfs_vistos = {}
+    for p in pasta.glob("*"):
+        if p.suffix.lower() == ".pdf":
+            pdfs_vistos[p.name.lower()] = p
+
+    pdfs = sorted(pdfs_vistos.values())
+    if not pdfs:
+        raise FileNotFoundError("Nenhum PDF encontrado na pasta.")
+
+    todos = []
+    for pdf_path in pdfs:
+        source = descriptografar(pdf_path, password)
+        todos.extend(processar_arquivo(pdf_path, source))
+
+    return todos
+
+
+# ---------------------------------------------------------------------------
+# Ponto de entrada
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-dir", required=True)
+    parser.add_argument("--cliente",   required=True)
+    parser.add_argument("--password",  default="")
+    args = parser.parse_args()
+
+    password = args.password
+    if not sys.stdin.isatty():
+        linha = sys.stdin.readline().strip()
+        if linha:
+            password = linha
+
+    avisos     = []
+    input_path = Path(args.input_dir)
+
+    if not input_path.exists():
+        print(f"ERRO: Pasta não encontrada: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if input_path.name != args.cliente:
+        avisos.append(
+            f"AVISO: Nome da pasta ({input_path.name}) diverge do --cliente "
+            f"({args.cliente}). Verifique isolamento de dados."
+        )
+
+    ts      = datetime.now()
+    id_lote = f"SM-{ts.strftime('%Y%m%d-%H%M%S')}"
+
+    try:
+        lancamentos = processar_pasta(input_path, password)
+        envelope = {
+            "id_lote":            id_lote,
+            "data_processamento": ts.isoformat(timespec="seconds"),
+            "emissor":            "samsung",
+            "cliente":            args.cliente,
+            "avisos":             avisos,
+            "lancamentos": [
+                {
+                    "cliente":            args.cliente,
+                    "id_lote":            id_lote,
+                    "arquivo":            l["arquivo"],
+                    "titular":            l["titular"],
+                    "final_cartao":       l["final_cartao"],
+                    "tipo":               l["tipo"],
+                    "data_compra":        l["data_compra"],
+                    "descricao":          l["descricao"],
+                    "parcela_num":        l["parcela_num"],
+                    "qtde_parcelas":      l["qtde_parcelas"],
+                    "vencimento":         l["vencimento"],
+                    "descricao_adaptada": l["descricao_adaptada"],
+                    "valor":              l["valor"],
+                }
+                for l in lancamentos
+            ],
+        }
+        print(json.dumps(envelope, ensure_ascii=False))
+    except Exception as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
