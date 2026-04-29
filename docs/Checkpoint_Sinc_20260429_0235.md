@@ -1,8 +1,8 @@
 # CHECKPOINT_SINC — Extratores AZ Resultados
 v1.5-MVP | 2026-04-29 | Para: Claude Code
 
-**Revisão:** v5 — arquitetura v1.5, schema v2, adendo A6 (2026-04-29)  
-**Fonte da verdade:** este documento prevalece sobre Checkpoint_Sinc_20260428_1631.md
+**Revisão:** v6 — corrige fluxo de senha (Seção 4), remove python-dateutil, ajusta diagrama repo  
+**Fonte da verdade:** este documento prevalece sobre Checkpoint_Sinc_20260429_0148.md
 
 ---
 
@@ -26,7 +26,6 @@ v1.5-MVP | 2026-04-29 | Para: Claude Code
 Python          3.13.7  venv: C:\Dev\projetos\Extratores\venv\
 pdfplumber      0.11.9
 pikepdf         10.5.1
-python-dateutil 2.9.0.post0
 VBA             Excel 365
 Git             public repo AZResultados/Extratores
 ```
@@ -55,22 +54,24 @@ AZResultados/Extratores/
 │   ├── ModComum.bas            (ProcessarExtrator + utilitários)
 │   ├── ModProcessar.bas        (botão Processar)
 │   ├── ModClientes.bas         (cadastro de clientes)
-│   ├── ModSenhas.bas           (cadastro de senhas PDF)
-│   └── Inativos/               (ModMP.bas, ModSantander.bas — obsoletos)
+│   └── ModSenhas.bas           (cadastro de senhas PDF)
 └── docs/
     ├── SDD/
     │   ├── Requiriments_20260428_1631.md
     │   ├── Design_Doc_20260429_0148.md      ← atual
-    │   ├── Tasks_20260428_1821.md
-    │   └── inativos/
+    │   └── Tasks_20260428_1821.md
     ├── Esquema_LctosTratados_20260429_0148.md  ← atual
-    ├── Checkpoint_Sinc_20260429_0148.md     ← este arquivo
-    └── inativos/
+    └── Checkpoint_Sinc_20260429_0235.md     ← este arquivo
 
-Fora do repo:
-C:\Users\[operador]\OneDrive\Documentos\Automações\Extratores.xlsm
-  Aba: LctosTratados (única necessária)
-  Banco local: C:\Users\[operador]\.extratores\dados.db
+Fora do repo (local only):
+  vba/Inativos/               — ModMP.bas, ModSantander.bas obsoletos
+  docs/Inativos/              — versões anteriores deste checkpoint
+  docs/SDD/Inativos/          — versões anteriores de Design Docs e Tasks
+
+Fora do repo (operador):
+  C:\Users\[operador]\OneDrive\Documentos\Automações\Extratores.xlsm
+    Aba: LctosTratados (única necessária)
+  C:\Users\[operador]\.extratores\dados.db   — banco SQLite de senhas e clientes
 ```
 
 ---
@@ -79,13 +80,17 @@ C:\Users\[operador]\OneDrive\Documentos\Automações\Extratores.xlsm
 
 ```
 [botão Processar] → ModProcessar.Processar()
-  └─ SelecionarCliente() → banco SQLite → InputBox número
+  └─ SelecionarCliente() → setup_cliente.py list → InputBox número
   └─ SelecionarPasta()   → BrowseForFolder a partir de base_dir do cliente
   └─ ProcessarExtrator(cliente, inputDir)
        └─ WScript.Shell.Exec()
             cmd /c python.exe extrator.py --cliente X --input-dir Y
-            → Python: pdf_router.rotear(pdf) → detecta emissor por fingerprint
-                     → cicla senhas do banco SQLite via stdin
+            oExec.StdIn.Close  ← stdin fechado imediatamente; extrator.py não lê stdin
+            → Python: pdf_router.rotear(pdf_path, cliente)
+                     → tenta abrir sem senha
+                     → se protegido: cicla senhas via db_senha.get_todas_senhas(cliente)
+                       (senhas lidas do SQLite interno — nao passadas pelo VBA)
+                     → detecta emissor por fingerprint de texto
                      → processar_arquivo(pdf_path, source)
                      → json.dumps(envelope) → sys.stdout
             → VBA: jsonStr = oExec.StdOut.ReadAll (bloqueia até término)
@@ -94,6 +99,12 @@ C:\Users\[operador]\OneDrive\Documentos\Automações\Extratores.xlsm
                    On Error GoTo ErroParse (cobre parse + gravação)
                    ScriptControl → parse jsonStr → checa "avisos" → MsgBox
                    → APPEND em LctosTratados (13 colunas)
+
+[botão Cadastrar Senha] → ModSenhas.CadastrarSenhaPDF()
+  └─ SelecionarCliente() → InputBox senha
+  └─ Exec: setup_senha.py add <cliente> --stdin
+           oExec.StdIn.WriteLine senha  ← única vez que stdin entrega senha ao Python
+           oExec.StdIn.Close
 ```
 
 ---
@@ -102,15 +113,15 @@ C:\Users\[operador]\OneDrive\Documentos\Automações\Extratores.xlsm
 
 ```json
 {
-  "id_lote": "SA-20260429-014800",
-  "data_processamento": "2026-04-29T01:48:00",
+  "id_lote": "SA-20260429-023500",
+  "data_processamento": "2026-04-29T02:35:00",
   "emissor": "santander|mercadopago|multi",
   "cliente": "NOME-CLIENTE",
   "avisos": [],
   "lancamentos": [
     {
       "cliente":            "NOME-CLIENTE",
-      "id_lote":            "SA-20260429-014800",
+      "id_lote":            "SA-20260429-023500",
       "arquivo":            "fatura.pdf",
       "titular":            "NOME TITULAR",
       "final_cartao":       "1234",
@@ -167,7 +178,7 @@ Schema completo com regras: `docs/Esquema_LctosTratados_20260429_0148.md`
 | Item | Estado |
 |------|--------|
 | Armazenamento | SQLite local `~/.extratores/dados.db`, schema `(cliente, senha)` |
-| Entrega ao Python | stdin (`StdIn.WriteLine senha` no VBA) — nunca arg CLI |
+| Entrega ao Python | `setup_senha.py` recebe via stdin; `extrator.py` lê do SQLite diretamente |
 | Santander | Senha cadastrada via botão [Cadastrar Senha] no xlsm |
 | Mercado Pago | PDF sem senha; `get_todas_senhas()` retorna lista vazia |
 | BR-08 status | CONFORME para MVP (operador único = proprietário AZ) |
@@ -202,7 +213,7 @@ Ver `docs/SDD/Tasks_20260428_1821.md` para spec completa.
 | A13 | Descriptografia centralizada em src/pdf_decrypt.py |
 | A14 | VBA é camada temporária — lógica em Python; VBA no VBA = retrabalho na migração (NFR-01) |
 | A15 | Credenciais via banco SQLite local — nunca hardcoded, nunca em planilha |
-| A16 | Senhas armazenadas em SQLite `~/.extratores/dados.db`; entregues via stdin — nunca em arg CLI |
+| A16 | Senhas armazenadas em SQLite `~/.extratores/dados.db`; entregues via stdin apenas ao setup_senha.py |
 | A17 | Router detecta emissor por fingerprint de texto — nunca pela senha que abriu o PDF |
 | A18 | extrator.py é o único entry point de produção; extratores expostos via processar_arquivo() |
 | A19 | Schema v2: titular e final_cartao como campos separados — nunca concatenados |
@@ -215,11 +226,10 @@ Ver `docs/SDD/Tasks_20260428_1821.md` para spec completa.
 
 ## 10. PROTOCOLO DE EXECUÇÃO
 
-1. Uma TASK por vez
-2. Testar com PDF real antes de avançar
-3. Commit atômico após sucesso: mensagem genérica, sem dados sensíveis
-4. Se testes quebrarem → não avançar, corrigir primeiro
-5. Início de sessão: injetar este checkpoint como contexto
+1. Testar com PDF real após montar o xlsm
+2. Commit atômico após cada mudança: mensagem genérica, sem dados sensíveis
+3. Se testes quebrarem → corrigir antes de avançar
+4. Início de sessão: injetar este checkpoint como contexto
 
 ---
 
@@ -284,49 +294,9 @@ ENTRYPOINT ["python", "src/extrator.py"]
 
 ---
 
-## ADENDO A6 — Arquitetura v1.5 e Schema v2 (2026-04-29)
-
-### A6.1 Novos módulos Python
-
-| Módulo | Papel |
-|--------|-------|
-| `src/extrator.py` | Entry point único de produção — roteia PDFs e monta envelope |
-| `src/pdf_router.py` | Detecta emissor via fingerprint de texto após abrir o PDF |
-| `src/pdf_decrypt.py` | Descriptografia in-memory (fatal para extratores, não-fatal para router) |
-| `src/db_senha.py` | Acesso ao banco de senhas SQLite |
-| `src/db_cliente.py` | Cadastro de clientes SQLite |
-| `src/setup_senha.py` | CLI para gestão de senhas (VBA entrega senha via stdin) |
-| `src/setup_cliente.py` | CLI para gestão de clientes (lista `nome\|base_dir` para VBA) |
-
-### A6.2 Novos módulos VBA
-
-| Módulo | Papel |
-|--------|-------|
-| `ModConfig.bas` | Única constante `BASE_DIR` — todos os caminhos derivados |
-| `ModProcessar.bas` | Botão único "Processar" |
-| `ModClientes.bas` | Cadastro de clientes |
-| `ModSenhas.bas` | Cadastro de senhas PDF |
-| `vba/Inativos/` | ModMP.bas e ModSantander.bas obsoletos |
-
-### A6.3 Schema JSON dos lançamentos (v2.0)
-
-Ver seção 5 deste documento e `docs/SDD/Design_Doc_20260429_0148.md` para o envelope completo.
-
-### A6.4 Schema aba LctosTratados (v2.0 — 13 colunas)
-
-Ver `docs/Esquema_LctosTratados_20260429_0148.md` — fonte de verdade do schema.
-
-### A6.5 Credenciais — decisão final MVP
-
-Senhas armazenadas em SQLite local (`~/.extratores/dados.db`), schema `(cliente, senha)`.  
-Entregues ao Python via stdin (`StdIn.WriteLine senha` no VBA).  
-Env var `EXTRATOR_SENHA_SANTANDER` descartada — substituída pelo banco.
-
----
-
 ## META
 
 repo: https://github.com/AZResultados/Extratores  
 versão: 1.5-MVP  
 próxima ação: Montar xlsm e testar com PDFs reais  
-gerado: 2026-04-29 | fonte: Design_Doc_20260429_0148 + Tasks_20260428_1821 + Checkpoint_20260428_1631
+gerado: 2026-04-29 | fonte: Design_Doc_20260429_0148 + Tasks_20260428_1821 + Checkpoint_20260429_0148
