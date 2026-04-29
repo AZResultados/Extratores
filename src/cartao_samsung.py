@@ -129,3 +129,124 @@ def classificar_tipo(descricao: str, tem_parcela: bool, secao_atual: str) -> str
         if kw in dl:
             return "Outros"
     return "Compra parcelada" if tem_parcela else "Compra à vista"
+
+
+# ---------------------------------------------------------------------------
+# Seções do PDF
+# ---------------------------------------------------------------------------
+
+SECAO_PAGAMENTOS  = "Pagamentos efetuados"
+SECAO_LANCAMENTOS = "Lançamentos: compras e saques"
+SECAO_INTER       = "Lançamentos internacionais"
+SECAO_PROXIMAS    = "Compras parceladas - próximas faturas"
+SECAO_IGNORAR     = {SECAO_PROXIMAS}
+_SECOES_LABEL     = {SECAO_PAGAMENTOS, SECAO_LANCAMENTOS, SECAO_INTER, SECAO_PROXIMAS}
+
+
+# ---------------------------------------------------------------------------
+# Parser de lançamentos
+# ---------------------------------------------------------------------------
+
+def parsear_lancamentos(caminho: Path, vencimento: date, titular: str, final_cartao: str, source=None) -> list:
+    lancamentos = []
+    vistos      = set()
+    secao_atual = ""
+
+    with pdfplumber.open(source if source is not None else caminho) as pdf:
+        for pg_idx in range(len(pdf.pages)):
+            page = pdf.pages[pg_idx]
+            for col in ("e", "d"):
+                segmento = extrair_segmento(page, col)
+
+                for y, tokens in segmento:
+                    txt = " ".join(tokens)
+
+                    # Detectar label de seção
+                    if txt in _SECOES_LABEL:
+                        secao_atual = txt
+                        log.debug("Secao detectada | pg=%d col=%s | secao=%s", pg_idx, col, txt)
+                        continue
+
+                    # Ignorar seção de próximas faturas
+                    if secao_atual in SECAO_IGNORAR:
+                        continue
+
+                    # Detectar lançamento
+                    t = list(tokens)
+                    if len(t) < 3:
+                        continue
+                    if not RE_DATA.match(t[0]):
+                        continue
+                    if not RE_VALOR.match(t[-1]):
+                        continue
+
+                    data_str  = t[0]
+                    valor_str = t[-1]
+
+                    if RE_PARC.match(t[-2]):
+                        parcela_str = t[-2]
+                        desc_tokens = t[1:-2]
+                    else:
+                        parcela_str = ""
+                        desc_tokens = t[1:-1]
+
+                    descricao = " ".join(desc_tokens).strip()
+                    if not descricao:
+                        continue
+
+                    dia, mes = map(int, data_str.split("/"))
+                    valor    = float(valor_str.replace(".", "").replace(",", "."))
+
+                    tem_parcela = bool(parcela_str)
+                    if tem_parcela:
+                        pa, pt        = map(int, parcela_str.split("/"))
+                        parcela_num   = pa
+                        qtde_parcelas = pt
+                    else:
+                        parcela_num   = 0
+                        qtde_parcelas = 0
+
+                    try:
+                        if tem_parcela:
+                            ano = inferir_ano_parcelado(mes, vencimento, parcela_num)
+                        else:
+                            ano = inferir_ano_avista(mes, vencimento)
+                        data_compra = date(ano, mes, dia).strftime("%d/%m/%Y")
+                    except Exception:
+                        data_compra = None
+
+                    if secao_atual == SECAO_INTER:
+                        tipo = "Outros"
+                    else:
+                        sec  = "pagamentos" if secao_atual == SECAO_PAGAMENTOS else "lancamentos"
+                        tipo = classificar_tipo(descricao, tem_parcela, sec)
+
+                    valor_final = abs(valor) if tipo == "Pagamento" else -abs(valor)
+
+                    if qtde_parcelas > 0:
+                        descricao_adaptada = f"{descricao} parc {parcela_num}/{qtde_parcelas}"
+                    else:
+                        descricao_adaptada = descricao
+                    if data_compra:
+                        descricao_adaptada += f" {data_compra}"
+
+                    chave = (str(caminho), pg_idx, col, y)
+                    if chave in vistos:
+                        continue
+                    vistos.add(chave)
+
+                    lancamentos.append({
+                        "arquivo":            caminho.name,
+                        "titular":            titular,
+                        "final_cartao":       final_cartao,
+                        "tipo":               tipo,
+                        "data_compra":        data_compra,
+                        "descricao":          descricao,
+                        "parcela_num":        parcela_num,
+                        "qtde_parcelas":      qtde_parcelas,
+                        "vencimento":         vencimento.strftime("%d/%m/%Y"),
+                        "descricao_adaptada": descricao_adaptada,
+                        "valor":              valor_final,
+                    })
+
+    return lancamentos
