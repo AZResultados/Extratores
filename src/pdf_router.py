@@ -23,6 +23,7 @@ log = get_logger("extratores.router")
 FINGERPRINTS = {
     "mercadopago": ["Mercado Pago", "MercadoPago"],
     "santander":   ["Santander", "SANTANDER"],
+    "samsung":     ["App Samsung Itaú", "4004 4828"],
 }
 
 

@@ -15,6 +15,7 @@ from logger import get_logger
 from pdf_router import rotear
 import cartao_mercadopago as mp
 import cartao_santander   as sa
+import cartao_samsung     as sm
 
 log = get_logger("extratores.extrator")
 
@@ -22,11 +23,13 @@ log = get_logger("extratores.extrator")
 EXTRATORES = {
     "mercadopago": mp.processar_arquivo,
     "santander":   sa.processar_arquivo,
+    "samsung":     sm.processar_arquivo,
 }
 
 PREFIXOS_LOTE = {
     "mercadopago": "MP",
     "santander":   "SA",
+    "samsung":     "SM",
 }
 
 
