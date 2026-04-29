@@ -39,7 +39,13 @@ def _ler_primeira_pagina(source) -> str:
     if hasattr(source, "seek"):
         source.seek(0)
     with pdfplumber.open(source) as pdf:
-        texto = pdf.pages[0].extract_text() or ""
+        # Lê até 2 páginas: fingerprints Samsung ficam na página 1 (índice 1)
+        partes = []
+        for page in pdf.pages[:2]:
+            t = page.extract_text()
+            if t:
+                partes.append(t)
+        texto = "\n".join(partes)
     if hasattr(source, "seek"):
         source.seek(0)
     return texto
