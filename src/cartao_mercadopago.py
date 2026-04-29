@@ -63,7 +63,7 @@ def extrair_titular_cartao(texto: str) -> tuple:
 # Inferência de ano
 # ---------------------------------------------------------------------------
 
-def inferir_ano_parcelado(dia: int, mes: int, vencimento: date, parcela_atual: int) -> int:
+def inferir_ano_parcelado(mes: int, vencimento: date, parcela_atual: int) -> int:
     ano      = vencimento.year
     mes_orig = vencimento.month - (parcela_atual - 1)
     while mes_orig <= 0:
@@ -73,7 +73,7 @@ def inferir_ano_parcelado(dia: int, mes: int, vencimento: date, parcela_atual: i
     return ano if mes <= mes_ref else ano - 1
 
 
-def inferir_ano_avista(dia: int, mes: int, vencimento: date) -> int:
+def inferir_ano_avista(mes: int, vencimento: date) -> int:
     return vencimento.year - 1 if mes > vencimento.month else vencimento.year
 
 
@@ -111,6 +111,7 @@ LINHAS_IGNORAR = {"total", "data movimentações valor em r$", "movimentações"
 
 
 def parsear_lancamentos(texto: str, vencimento: date, caminho_pdf: Path) -> list:
+    titular, final_cartao = extrair_titular_cartao(texto)
     lancamentos = []
     vistos = set()
 
@@ -143,9 +144,9 @@ def parsear_lancamentos(texto: str, vencimento: date, caminho_pdf: Path) -> list
 
         try:
             if tem_parcela:
-                ano = inferir_ano_parcelado(dia, mes, vencimento, parcela_num)
+                ano = inferir_ano_parcelado(mes, vencimento, parcela_num)
             else:
-                ano = inferir_ano_avista(dia, mes, vencimento)
+                ano = inferir_ano_avista(mes, vencimento)
             data_compra = date(ano, mes, dia).strftime("%d/%m/%Y")
         except Exception:
             data_compra = None
@@ -162,8 +163,8 @@ def parsear_lancamentos(texto: str, vencimento: date, caminho_pdf: Path) -> list
 
         lancamentos.append({
             "arquivo":            caminho_pdf.name,
-            "titular":            "",
-            "final_cartao":       "",
+            "titular":            titular,
+            "final_cartao":       final_cartao,
             "tipo":               tipo_final,
             "data_compra":        data_compra,
             "descricao":          desc_clean,
@@ -197,20 +198,15 @@ def validar_total(lancamentos: list, texto: str):
 
 def processar_arquivo(pdf_path: Path, source) -> list:
     """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
-    texto                 = extrair_texto_pdf(source)
-    venc                  = extrair_vencimento(texto)
-    titular, final_cartao = extrair_titular_cartao(texto)
-    lancamentos           = parsear_lancamentos(texto, venc, pdf_path)
+    texto       = extrair_texto_pdf(source)
+    venc        = extrair_vencimento(texto)
+    lancamentos = parsear_lancamentos(texto, venc, pdf_path)
     ok, total_pdf, total_calc = validar_total(lancamentos, texto)
     if not ok:
         raise ValueError(
             f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
             f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
         )
-    for l in lancamentos:
-        l["titular"]      = titular
-        l["final_cartao"] = final_cartao
-        l["emissor"]      = "mercadopago"
     return lancamentos
 
 

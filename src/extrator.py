@@ -11,11 +11,6 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-try:
-    import pdfplumber
-except ImportError:
-    sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
-
 from pdf_router import rotear
 import cartao_mercadopago as mp
 import cartao_santander   as sa

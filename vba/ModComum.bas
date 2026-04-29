@@ -42,7 +42,6 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
 
     On Error GoTo ErroParse
     sc.ExecuteStatement "var env = " & jsonStr
-    On Error GoTo 0
 
     Dim avisosLen As Long
     Dim avisosMsg As String
@@ -57,7 +56,7 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
 
     On Error Resume Next
     Set wsDados = ThisWorkbook.Sheets("LctosTratados")
-    On Error GoTo 0
+    On Error GoTo ErroParse
 
     If wsDados Is Nothing Then
         ' Primeira execucao: aba ainda nao existe
@@ -69,7 +68,7 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
         ' Aba existe mas com schema antigo: preserva como legado
         On Error Resume Next
         wsDados.Name = "LctosTratados_legado"
-        On Error GoTo 0
+        On Error GoTo ErroParse
         Set wsDados = ThisWorkbook.Sheets.Add( _
             After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
         wsDados.Name = "LctosTratados"
@@ -119,8 +118,9 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
     Exit Sub
 
 ErroParse:
-    MsgBox "ERRO: JSON invalido recebido do Python." & vbCrLf & _
-           "Primeiros 200 chars: " & Left(jsonStr, 200), vbCritical
+    MsgBox "ERRO ao processar " & nomeCliente & ":" & vbCrLf & _
+           Err.Description & vbCrLf & vbCrLf & _
+           "JSON (200 chars): " & Left(jsonStr, 200), vbCritical
 End Sub
 
 
@@ -129,6 +129,9 @@ End Sub
 ' =============================================================================
 
 Function ObterListaClientes() As String()
+    Dim vazio(0) As String
+    vazio(0) = ""
+
     Dim oShell As Object, oExec As Object
     Set oShell = CreateObject("WScript.Shell")
     Set oExec = oShell.Exec("cmd /c chcp 65001 > nul && " & _
@@ -136,11 +139,15 @@ Function ObterListaClientes() As String()
                 Chr(34) & SetupClienteScript() & Chr(34) & " list")
     oExec.StdIn.Close
 
-    Dim saida As String
-    saida = Replace(Trim(oExec.StdOut.ReadAll), vbCr, "")
+    Dim saida As String, erroStr As String
+    saida   = Replace(Trim(oExec.StdOut.ReadAll), vbCr, "")
+    erroStr = oExec.StdErr.ReadAll
 
-    Dim vazio(0) As String
-    vazio(0) = ""
+    If oExec.ExitCode <> 0 Then
+        MsgBox "ERRO ao listar clientes:" & vbCrLf & erroStr, vbCritical
+        ObterListaClientes = vazio
+        Exit Function
+    End If
 
     If saida = "" Or saida = "VAZIO" Then
         ObterListaClientes = vazio

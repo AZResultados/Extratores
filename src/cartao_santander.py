@@ -49,7 +49,6 @@ def extrair_vencimento(texto: str) -> date:
 
 RE_DATA  = re.compile(r"^\d{2}/\d{2}$")
 RE_VALOR = re.compile(r"^-?[\d.]+,\d{2}$")
-RE_PARC  = re.compile(r"^\d{2}/\d{2}$")
 RE_TITUL = re.compile(
     r"@?\s*([A-ZÀ-Ú][A-ZÀ-Ú\s]+?)\s*-\s*\d{4}\s+XXXX\s+XXXX\s+(\d{4})"
 )
@@ -59,7 +58,7 @@ RE_TITUL = re.compile(
 # Inferência de ano
 # ---------------------------------------------------------------------------
 
-def inferir_ano_parcelado(dia: int, mes: int, vencimento: date, parcela_atual: int) -> int:
+def inferir_ano_parcelado(mes: int, vencimento: date, parcela_atual: int) -> int:
     ano      = vencimento.year
     mes_orig = vencimento.month - (parcela_atual - 1)
     while mes_orig <= 0:
@@ -69,7 +68,7 @@ def inferir_ano_parcelado(dia: int, mes: int, vencimento: date, parcela_atual: i
     return ano if mes <= mes_ref else ano - 1
 
 
-def inferir_ano_avista(dia: int, mes: int, vencimento: date) -> int:
+def inferir_ano_avista(mes: int, vencimento: date) -> int:
     return vencimento.year - 1 if mes > vencimento.month else vencimento.year
 
 
@@ -169,7 +168,7 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
                     data_str  = t[0]
                     valor_str = t[-1]
 
-                    if len(t) >= 3 and RE_PARC.match(t[-2]):
+                    if len(t) >= 3 and RE_DATA.match(t[-2]):
                         parcela_str = t[-2]
                         desc_tokens = t[1:-2]
                     else:
@@ -194,9 +193,9 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
 
                     try:
                         if tem_parcela:
-                            ano = inferir_ano_parcelado(dia, mes, vencimento, parcela_num)
+                            ano = inferir_ano_parcelado(mes, vencimento, parcela_num)
                         else:
-                            ano = inferir_ano_avista(dia, mes, vencimento)
+                            ano = inferir_ano_avista(mes, vencimento)
                         data_compra = date(ano, mes, dia).strftime("%d/%m/%Y")
                     except Exception:
                         data_compra = None
@@ -264,8 +263,6 @@ def processar_arquivo(pdf_path: Path, source) -> list:
             f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
             f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
         )
-    for l in lancamentos:
-        l["emissor"] = "santander"
     return lancamentos
 
 
