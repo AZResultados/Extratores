@@ -81,6 +81,7 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
     Dim lastRow As Long
     Dim i       As Long
     Dim prefix  As String
+    Dim dataCompraStr As String
 
     lastRow = wsDados.Cells(wsDados.Rows.Count, "A").End(xlUp).Row + 1
     rowNum  = lastRow
@@ -88,18 +89,26 @@ Sub ProcessarExtrator(nomeCliente As String, inputDir As String)
 
     For i = 0 To total - 1
         prefix = "env.lancamentos[" & i & "]."
+        dataCompraStr = sc.Eval("env.lancamentos[" & i & "].data_compra || ''")
         With wsDados
-            .Cells(rowNum, 1).Value = sc.Eval(prefix & "cliente")
-            .Cells(rowNum, 2).Value = sc.Eval(prefix & "id_lote")
-            .Cells(rowNum, 3).Value = sc.Eval(prefix & "arquivo")
-            .Cells(rowNum, 4).Value = CDate(sc.Eval(prefix & "vencimento"))
-            .Cells(rowNum, 4).NumberFormat = "dd/mm/yyyy"
-            .Cells(rowNum, 5).Value = sc.Eval(prefix & "descricao")
-            .Cells(rowNum, 6).Value = sc.Eval("env.lancamentos[" & i & "].parcela || ''")
-            .Cells(rowNum, 7).Value = CDbl(sc.Eval(prefix & "valor"))
-            .Cells(rowNum, 7).NumberFormat = "#,##0.00"
-            .Cells(rowNum, 8).Value = sc.Eval(prefix & "tipo")
-            .Cells(rowNum, 9).Value = sc.Eval(prefix & "titular_cartao")
+            .Cells(rowNum,  1).Value = sc.Eval(prefix & "cliente")
+            .Cells(rowNum,  2).Value = sc.Eval(prefix & "id_lote")
+            .Cells(rowNum,  3).Value = sc.Eval(prefix & "arquivo")
+            .Cells(rowNum,  4).Value = sc.Eval(prefix & "titular")
+            .Cells(rowNum,  5).Value = sc.Eval(prefix & "final_cartao")
+            .Cells(rowNum,  6).Value = sc.Eval(prefix & "tipo")
+            If dataCompraStr <> "" Then
+                .Cells(rowNum, 7).Value = CDate(dataCompraStr)
+                .Cells(rowNum, 7).NumberFormat = "dd/mm/yyyy"
+            End If
+            .Cells(rowNum,  8).Value = sc.Eval(prefix & "descricao")
+            .Cells(rowNum,  9).Value = CLng(sc.Eval(prefix & "parcela_num"))
+            .Cells(rowNum, 10).Value = CLng(sc.Eval(prefix & "qtde_parcelas"))
+            .Cells(rowNum, 11).Value = CDate(sc.Eval(prefix & "vencimento"))
+            .Cells(rowNum, 11).NumberFormat = "dd/mm/yyyy"
+            .Cells(rowNum, 12).Value = sc.Eval(prefix & "descricao_adaptada")
+            .Cells(rowNum, 13).Value = CDbl(sc.Eval(prefix & "valor"))
+            .Cells(rowNum, 13).NumberFormat = "#,##0.00"
         End With
         rowNum = rowNum + 1
     Next i
@@ -208,15 +217,19 @@ End Function
 
 
 Private Sub _CriarCabecalho(ws As Worksheet)
-    ws.Cells(1, 1).Value = "Cliente"
-    ws.Cells(1, 2).Value = "ID_Lote"
-    ws.Cells(1, 3).Value = "Arquivo Origem"
-    ws.Cells(1, 4).Value = "Data Vencimento"
-    ws.Cells(1, 5).Value = "Descri" & Chr(231) & Chr(227) & "o"
-    ws.Cells(1, 6).Value = "Parcela"
-    ws.Cells(1, 7).Value = "Valor (R$)"
-    ws.Cells(1, 8).Value = "Tipo"
-    ws.Cells(1, 9).Value = "Titular - Cart" & Chr(227) & "o"
+    ws.Cells(1,  1).Value = "Cliente"
+    ws.Cells(1,  2).Value = "ID_Lote"
+    ws.Cells(1,  3).Value = "Arquivo Origem"
+    ws.Cells(1,  4).Value = "Titular do Cart" & Chr(227) & "o"
+    ws.Cells(1,  5).Value = "Final Cart" & Chr(227) & "o"
+    ws.Cells(1,  6).Value = "Tipo"
+    ws.Cells(1,  7).Value = "Data da Compra"
+    ws.Cells(1,  8).Value = "Descri" & Chr(231) & Chr(227) & "o"
+    ws.Cells(1,  9).Value = "Parcela"
+    ws.Cells(1, 10).Value = "Qtde Parcelas"
+    ws.Cells(1, 11).Value = "Data de Vencimento"
+    ws.Cells(1, 12).Value = "Descri" & Chr(231) & Chr(227) & "o Adaptada"
+    ws.Cells(1, 13).Value = "Valor (R$)"
     ws.Rows(1).Font.Bold = True
 End Sub
 

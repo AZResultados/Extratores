@@ -20,7 +20,6 @@ except ImportError:
 from pdf_decrypt import descriptografar
 
 
-
 # ---------------------------------------------------------------------------
 # Extração de texto do PDF
 # ---------------------------------------------------------------------------
@@ -46,56 +45,36 @@ def extrair_vencimento(texto: str) -> date:
     return datetime.strptime(m.group(1), "%d/%m/%Y").date()
 
 
-def extrair_titular_cartao(texto: str) -> str:
-    """Extrai nome do titular e últimos 4 dígitos do cartão.
-    Formato saída: 'James William da Costa - 7863'
-    """
-    import re as _re
-    # Nome do titular: primeira linha não vazia
+def extrair_titular_cartao(texto: str) -> tuple:
+    """Retorna (titular, final_cartao) extraídos do PDF."""
     nome = "Desconhecido"
     for linha in texto.splitlines():
         linha = linha.strip()
         if linha:
             nome = linha
             break
-
-    # Últimos 4 dígitos: padrão "Cartão Visa [************XXXX]"
-    m = _re.search(r"Cartão\s+\w+\s+\[[\*\s]*(\d{4})\]", texto)
+    m = re.search(r"Cartão\s+\w+\s+\[[\*\s]*(\d{4})\]", texto)
     if m:
-        return f"{nome} - {m.group(1)}"
-    return nome
+        return nome, m.group(1)
+    return nome, ""
 
 
 # ---------------------------------------------------------------------------
 # Inferência de ano
 # ---------------------------------------------------------------------------
 
-def inferir_ano_parcelado(dia: int, mes: int, vencimento: date,
-                           parcela_atual: int, parcela_total: int) -> int:
-    """
-    Retrocede (parcela_atual - 1) meses a partir do mês de vencimento
-    para encontrar o mês/ano da transação original.
-    """
-    ano  = vencimento.year
-    m    = vencimento.month - (parcela_atual - 1)
-    while m <= 0:
-        m   += 12
-        ano -= 1
-    # Ajusta para o mês/dia correto da transação
-    if mes != m % 12 or (m % 12 == 0 and mes != 12):
-        # Mês calculado difere do mês do PDF — usa mês do PDF e ajusta ano
-        ano_calc = ano
-        if mes > m % 12 if m % 12 != 0 else mes > 12:
-            ano_calc -= 1
-        return ano_calc
-    return ano
+def inferir_ano_parcelado(dia: int, mes: int, vencimento: date, parcela_atual: int) -> int:
+    ano      = vencimento.year
+    mes_orig = vencimento.month - (parcela_atual - 1)
+    while mes_orig <= 0:
+        mes_orig += 12
+        ano      -= 1
+    mes_ref = mes_orig % 12 or 12
+    return ano if mes <= mes_ref else ano - 1
 
 
 def inferir_ano_avista(dia: int, mes: int, vencimento: date) -> int:
-    """Para compras à vista: se mês da transação > mês do vencimento, é ano anterior."""
-    if mes > vencimento.month:
-        return vencimento.year - 1
-    return vencimento.year
+    return vencimento.year - 1 if mes > vencimento.month else vencimento.year
 
 
 # ---------------------------------------------------------------------------
@@ -147,36 +126,52 @@ def parsear_lancamentos(texto: str, vencimento: date, caminho_pdf: Path) -> list
 
         mp = RE_PARCELA.search(descricao)
         if mp:
-            parcela_atual = int(mp.group(1))
-            parcela_total = int(mp.group(2))
-            parcela    = f"{parcela_atual:02d}/{parcela_total:02d}"
-            desc_clean = RE_PARCELA.sub("", descricao).strip()
-            tem_parcela = True
+            parcela_num   = int(mp.group(1))
+            qtde_parcelas = int(mp.group(2))
+            desc_clean    = RE_PARCELA.sub("", descricao).strip()
+            tem_parcela   = True
         else:
-            parcela    = None
-            desc_clean = descricao.strip()
-            tem_parcela = False
+            parcela_num   = 0
+            qtde_parcelas = 0
+            desc_clean    = descricao.strip()
+            tem_parcela   = False
 
         chave = m.start()
         if chave in vistos:
             continue
         vistos.add(chave)
 
-        tipo_final = classificar_tipo(desc_clean, tem_parcela)
-        # Créditos positivos, débitos negativos
-        if tipo_final == "Pagamento":
-            valor_final = valor
+        try:
+            if tem_parcela:
+                ano = inferir_ano_parcelado(dia, mes, vencimento, parcela_num)
+            else:
+                ano = inferir_ano_avista(dia, mes, vencimento)
+            data_compra = date(ano, mes, dia).strftime("%d/%m/%Y")
+        except Exception:
+            data_compra = None
+
+        tipo_final  = classificar_tipo(desc_clean, tem_parcela)
+        valor_final = valor if tipo_final == "Pagamento" else -valor
+
+        if qtde_parcelas > 0:
+            descricao_adaptada = f"{desc_clean} parc {parcela_num}/{qtde_parcelas}"
         else:
-            valor_final = -valor
+            descricao_adaptada = desc_clean
+        if data_compra:
+            descricao_adaptada += f" {data_compra}"
 
         lancamentos.append({
-            "arquivo":        caminho_pdf.name,
-            "vencimento":     vencimento.strftime("%d/%m/%Y"),
-            "descricao":      desc_clean,
-            "parcela":        parcela,
-            "valor":          valor_final,
-            "tipo":           tipo_final,
-            "titular_cartao": "",
+            "arquivo":            caminho_pdf.name,
+            "titular":            "",
+            "final_cartao":       "",
+            "tipo":               tipo_final,
+            "data_compra":        data_compra,
+            "descricao":          desc_clean,
+            "parcela_num":        parcela_num,
+            "qtde_parcelas":      qtde_parcelas,
+            "vencimento":         vencimento.strftime("%d/%m/%Y"),
+            "descricao_adaptada": descricao_adaptada,
+            "valor":              valor_final,
         })
 
     return lancamentos
@@ -190,23 +185,22 @@ def validar_total(lancamentos: list, texto: str):
     m = re.search(r"^Total\s+R\$\s*([\d.]+,\d{2})", texto, re.MULTILINE)
     if not m:
         return False, 0.0, 0.0
-    total_pdf  = float(m.group(1).replace(".", "").replace(",", "."))
-    # Soma absoluta dos débitos para comparar com total do PDF
+    total_pdf    = float(m.group(1).replace(".", "").replace(",", "."))
     tipos_debito = {"Compra parcelada", "Compra à vista", "Outros"}
-    total_calc = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito)
+    total_calc   = sum(abs(l["valor"]) for l in lancamentos if l["tipo"] in tipos_debito)
     return abs(total_pdf - total_calc) < 0.05, total_pdf, total_calc
 
 
 # ---------------------------------------------------------------------------
-# Processar pasta
+# Processar arquivo / pasta
 # ---------------------------------------------------------------------------
 
 def processar_arquivo(pdf_path: Path, source) -> list:
     """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
-    texto          = extrair_texto_pdf(source)
-    venc           = extrair_vencimento(texto)
-    titular_cartao = extrair_titular_cartao(texto)
-    lancamentos    = parsear_lancamentos(texto, venc, pdf_path)
+    texto                 = extrair_texto_pdf(source)
+    venc                  = extrair_vencimento(texto)
+    titular, final_cartao = extrair_titular_cartao(texto)
+    lancamentos           = parsear_lancamentos(texto, venc, pdf_path)
     ok, total_pdf, total_calc = validar_total(lancamentos, texto)
     if not ok:
         raise ValueError(
@@ -214,8 +208,9 @@ def processar_arquivo(pdf_path: Path, source) -> list:
             f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
         )
     for l in lancamentos:
-        l["titular_cartao"] = titular_cartao
-        l["emissor"]        = "mercadopago"
+        l["titular"]      = titular
+        l["final_cartao"] = final_cartao
+        l["emissor"]      = "mercadopago"
     return lancamentos
 
 
@@ -226,7 +221,6 @@ def processar_pasta(pasta: Path, password: str = "") -> list:
             pdfs_vistos[p.name.lower()] = p
 
     pdfs = sorted(pdfs_vistos.values())
-
     if not pdfs:
         raise FileNotFoundError("Nenhum PDF encontrado na pasta.")
 
@@ -249,7 +243,6 @@ if __name__ == "__main__":
     parser.add_argument("--password",  default="")
     args = parser.parse_args()
 
-    # Standalone: usa --password ou stdin. Producao: extrator.py gerencia senha via router.
     password = args.password
     if not sys.stdin.isatty():
         linha = sys.stdin.readline().strip()
@@ -282,15 +275,19 @@ if __name__ == "__main__":
             "avisos":             avisos,
             "lancamentos": [
                 {
-                    "cliente":        args.cliente,
-                    "id_lote":        id_lote,
-                    "arquivo":        l["arquivo"],
-                    "vencimento":     l["vencimento"],
-                    "descricao":      l["descricao"],
-                    "parcela":        l["parcela"],
-                    "valor":          l["valor"],
-                    "tipo":           l["tipo"],
-                    "titular_cartao": l["titular_cartao"],
+                    "cliente":            args.cliente,
+                    "id_lote":            id_lote,
+                    "arquivo":            l["arquivo"],
+                    "titular":            l["titular"],
+                    "final_cartao":       l["final_cartao"],
+                    "tipo":               l["tipo"],
+                    "data_compra":        l["data_compra"],
+                    "descricao":          l["descricao"],
+                    "parcela_num":        l["parcela_num"],
+                    "qtde_parcelas":      l["qtde_parcelas"],
+                    "vencimento":         l["vencimento"],
+                    "descricao_adaptada": l["descricao_adaptada"],
+                    "valor":              l["valor"],
                 }
                 for l in lancamentos
             ],

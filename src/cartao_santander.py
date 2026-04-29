@@ -66,7 +66,7 @@ def inferir_ano_parcelado(dia: int, mes: int, vencimento: date, parcela_atual: i
         mes_orig += 12
         ano      -= 1
     mes_ref = mes_orig % 12 or 12
-    return ano if mes == mes_ref else (ano if mes < mes_ref else ano - 1)
+    return ano if mes <= mes_ref else ano - 1
 
 
 def inferir_ano_avista(dia: int, mes: int, vencimento: date) -> int:
@@ -79,14 +79,10 @@ def inferir_ano_avista(dia: int, mes: int, vencimento: date) -> int:
 
 KEYWORDS_PAGAMENTO = ["deb autom de fatura", "pagamento"]
 KEYWORDS_OUTROS    = ["iof", "juros", "multa", "anuidade"]
-LIMITE_AJUSTE      = 1.00
 
 
-def classificar_tipo(descricao: str, valor: float, tem_parcela: bool) -> str:
+def classificar_tipo(descricao: str, tem_parcela: bool) -> str:
     dl = descricao.lower()
-    if valor < 0 and abs(valor) < LIMITE_AJUSTE:
-        if not any(kw in dl for kw in KEYWORDS_PAGAMENTO):
-            return "Ajuste"
     for kw in KEYWORDS_PAGAMENTO:
         if kw in dl:
             return "Pagamento"
@@ -101,19 +97,13 @@ def classificar_tipo(descricao: str, valor: float, tem_parcela: bool) -> str:
 # ---------------------------------------------------------------------------
 
 def extrair_segmento(page, col: str) -> list:
-    """
-    Extrai words de uma coluna (col='e' ou 'd') de uma página.
-    Retorna lista de (y, [tokens]) ordenada por y.
-    """
     words = page.extract_words(keep_blank_chars=False, x_tolerance=3, y_tolerance=3)
 
-    # Filtrar por coluna
     if col == "e":
         words_col = [w for w in words if w["x0"] < X_DIV]
     else:
         words_col = [w for w in words if w["x0"] >= X_DIV]
 
-    # Agrupar por Y (granularidade 4)
     linhas_dict = defaultdict(list)
     for w in words_col:
         y = round(w["top"] / 4) * 4
@@ -144,15 +134,13 @@ def extrair_segmento(page, col: str) -> list:
 # ---------------------------------------------------------------------------
 
 def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
-    lancamentos  = []
-    vistos       = set()
-    titular_atual = "Desconhecido"
+    lancamentos         = []
+    vistos              = set()
+    titular_nome_atual  = "Desconhecido"
+    titular_final_atual = ""
 
     with pdfplumber.open(source if source is not None else caminho) as pdf:
-        paginas = list(range(len(pdf.pages)))
-
-        # Ordem linear: pe, pd para cada página
-        for pg_idx in paginas:
+        for pg_idx in range(len(pdf.pages)):
             page = pdf.pages[pg_idx]
             for col in ("e", "d"):
                 segmento = extrair_segmento(page, col)
@@ -163,9 +151,8 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
                     # Detectar titular
                     m = RE_TITUL.search(txt)
                     if m:
-                        nome = " ".join(m.group(1).split())
-                        cartao = m.group(2)
-                        titular_atual = f"{nome} - {cartao}"
+                        titular_nome_atual  = " ".join(m.group(1).split())
+                        titular_final_atual = m.group(2)
                         continue
 
                     # Detectar lançamento
@@ -182,7 +169,6 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
                     data_str  = t[0]
                     valor_str = t[-1]
 
-                    # Parcela
                     if len(t) >= 3 and RE_PARC.match(t[-2]):
                         parcela_str = t[-2]
                         desc_tokens = t[1:-2]
@@ -199,13 +185,31 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
 
                     tem_parcela = bool(parcela_str)
                     if tem_parcela:
-                        pa, pt  = map(int, parcela_str.split("/"))
-                        parcela = f"{pa:02d}/{pt:02d}"
+                        pa, pt        = map(int, parcela_str.split("/"))
+                        parcela_num   = pa
+                        qtde_parcelas = pt
                     else:
-                        parcela = None
+                        parcela_num   = 0
+                        qtde_parcelas = 0
 
-                    tipo        = classificar_tipo(descricao, valor, tem_parcela)
-                    valor_final = abs(valor) if tipo in ("Pagamento", "Ajuste") else -abs(valor)
+                    try:
+                        if tem_parcela:
+                            ano = inferir_ano_parcelado(dia, mes, vencimento, parcela_num)
+                        else:
+                            ano = inferir_ano_avista(dia, mes, vencimento)
+                        data_compra = date(ano, mes, dia).strftime("%d/%m/%Y")
+                    except Exception:
+                        data_compra = None
+
+                    tipo        = classificar_tipo(descricao, tem_parcela)
+                    valor_final = abs(valor) if tipo == "Pagamento" else -abs(valor)
+
+                    if qtde_parcelas > 0:
+                        descricao_adaptada = f"{descricao} parc {parcela_num}/{qtde_parcelas}"
+                    else:
+                        descricao_adaptada = descricao
+                    if data_compra:
+                        descricao_adaptada += f" {data_compra}"
 
                     chave = (str(caminho), pg_idx, col, y)
                     if chave in vistos:
@@ -213,13 +217,17 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
                     vistos.add(chave)
 
                     lancamentos.append({
-                        "arquivo":        caminho.name,
-                        "vencimento":     vencimento.strftime("%d/%m/%Y"),
-                        "descricao":      descricao,
-                        "parcela":        parcela,
-                        "valor":          valor_final,
-                        "tipo":           tipo,
-                        "titular_cartao": titular_atual,
+                        "arquivo":            caminho.name,
+                        "titular":            titular_nome_atual,
+                        "final_cartao":       titular_final_atual,
+                        "tipo":               tipo,
+                        "data_compra":        data_compra,
+                        "descricao":          descricao,
+                        "parcela_num":        parcela_num,
+                        "qtde_parcelas":      qtde_parcelas,
+                        "vencimento":         vencimento.strftime("%d/%m/%Y"),
+                        "descricao_adaptada": descricao_adaptada,
+                        "valor":              valor_final,
                     })
 
     return lancamentos
@@ -240,7 +248,7 @@ def validar_total(lancamentos: list, texto: str):
 
 
 # ---------------------------------------------------------------------------
-# Processar pasta
+# Processar arquivo / pasta
 # ---------------------------------------------------------------------------
 
 def processar_arquivo(pdf_path: Path, source) -> list:
@@ -290,7 +298,6 @@ if __name__ == "__main__":
     parser.add_argument("--password",  default="")
     args = parser.parse_args()
 
-    # Standalone: usa --password ou stdin. Producao: extrator.py gerencia senha via router.
     password = args.password
     if not sys.stdin.isatty():
         linha = sys.stdin.readline().strip()
@@ -323,15 +330,19 @@ if __name__ == "__main__":
             "avisos":             avisos,
             "lancamentos": [
                 {
-                    "cliente":        args.cliente,
-                    "id_lote":        id_lote,
-                    "arquivo":        l["arquivo"],
-                    "vencimento":     l["vencimento"],
-                    "descricao":      l["descricao"],
-                    "parcela":        l["parcela"],
-                    "valor":          l["valor"],
-                    "tipo":           l["tipo"],
-                    "titular_cartao": l["titular_cartao"],
+                    "cliente":            args.cliente,
+                    "id_lote":            id_lote,
+                    "arquivo":            l["arquivo"],
+                    "titular":            l["titular"],
+                    "final_cartao":       l["final_cartao"],
+                    "tipo":               l["tipo"],
+                    "data_compra":        l["data_compra"],
+                    "descricao":          l["descricao"],
+                    "parcela_num":        l["parcela_num"],
+                    "qtde_parcelas":      l["qtde_parcelas"],
+                    "vencimento":         l["vencimento"],
+                    "descricao_adaptada": l["descricao_adaptada"],
+                    "valor":              l["valor"],
                 }
                 for l in lancamentos
             ],

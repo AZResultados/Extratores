@@ -28,10 +28,14 @@ Sub CadastrarSenhaPDF()
     oExec.StdIn.WriteLine senha
     oExec.StdIn.Close
 
+    Dim stdoutStr As String, stderrStr As String
+    stdoutStr = oExec.StdOut.ReadAll
+    stderrStr = oExec.StdErr.ReadAll
+
     If oExec.ExitCode = 0 Then
-        MsgBox oExec.StdOut.ReadAll, vbInformation, "Cadastrar Senha PDF"
+        MsgBox stdoutStr, vbInformation, "Cadastrar Senha PDF"
     Else
-        MsgBox "ERRO: " & oExec.StdErr.ReadAll, vbCritical, "Cadastrar Senha PDF"
+        MsgBox "ERRO: " & stderrStr, vbCritical, "Cadastrar Senha PDF"
     End If
 End Sub
 
@@ -59,5 +63,13 @@ Sub RemoverSenhaPDF()
     oExec.StdIn.WriteLine senha
     oExec.StdIn.Close
 
-    MsgBox oExec.StdOut.ReadAll, vbInformation, "Remover Senha PDF"
+    Dim stdoutStr As String, stderrStr As String
+    stdoutStr = oExec.StdOut.ReadAll
+    stderrStr = oExec.StdErr.ReadAll
+
+    If oExec.ExitCode = 0 Then
+        MsgBox stdoutStr, vbInformation, "Remover Senha PDF"
+    Else
+        MsgBox "ERRO: " & stderrStr, vbCritical, "Remover Senha PDF"
+    End If
 End Sub

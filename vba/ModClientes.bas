@@ -27,10 +27,14 @@ Sub CadastrarCliente()
     Set oExec  = oShell.Exec(cmd)
     oExec.StdIn.Close
 
+    Dim stdoutStr As String, stderrStr As String
+    stdoutStr = oExec.StdOut.ReadAll
+    stderrStr = oExec.StdErr.ReadAll
+
     If oExec.ExitCode = 0 Then
-        MsgBox oExec.StdOut.ReadAll, vbInformation, "Cadastrar Cliente"
+        MsgBox stdoutStr, vbInformation, "Cadastrar Cliente"
     Else
-        MsgBox "ERRO: " & oExec.StdErr.ReadAll, vbCritical, "Cadastrar Cliente"
+        MsgBox "ERRO: " & stderrStr, vbCritical, "Cadastrar Cliente"
     End If
 End Sub
 
@@ -55,5 +59,13 @@ Sub RemoverCliente()
     Set oExec  = oShell.Exec(cmd)
     oExec.StdIn.Close
 
-    MsgBox oExec.StdOut.ReadAll, vbInformation, "Remover Cliente"
+    Dim stdoutStr As String, stderrStr As String
+    stdoutStr = oExec.StdOut.ReadAll
+    stderrStr = oExec.StdErr.ReadAll
+
+    If oExec.ExitCode = 0 Then
+        MsgBox stdoutStr, vbInformation, "Remover Cliente"
+    Else
+        MsgBox "ERRO: " & stderrStr, vbCritical, "Remover Cliente"
+    End If
 End Sub
