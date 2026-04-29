@@ -12,6 +12,10 @@ import os
 import sqlite3
 from pathlib import Path
 
+from logger import get_logger
+
+log = get_logger("extratores.db")
+
 DB_PATH = Path(os.environ.get("EXTRATORES_DB",
                str(Path.home() / ".extratores" / "dados.db")))
 
@@ -43,7 +47,12 @@ def set_senha(cliente: str, senha: str) -> bool:
             "INSERT OR IGNORE INTO senhas_pdf (cliente, senha) VALUES (?, ?)",
             (cliente, senha)
         )
-        return cur.rowcount == 1
+        nova = cur.rowcount == 1
+    if nova:
+        log.info("Senha cadastrada | cliente=%s", cliente)
+    else:
+        log.debug("Senha duplicada ignorada | cliente=%s", cliente)
+    return nova
 
 
 def get_todas_senhas(cliente: str) -> list:
@@ -54,8 +63,11 @@ def get_todas_senhas(cliente: str) -> list:
                 "SELECT senha FROM senhas_pdf WHERE cliente=?",
                 (cliente,)
             ).fetchall()
-        return [r[0] for r in rows]
-    except Exception:
+        senhas = [r[0] for r in rows]
+        log.debug("Senhas consultadas | cliente=%s | total=%d", cliente, len(senhas))
+        return senhas
+    except Exception as e:
+        log.error("Erro ao consultar senhas | cliente=%s | erro=%s", cliente, str(e))
         return []
 
 
@@ -66,6 +78,7 @@ def remover_senha(cliente: str, senha: str):
             "DELETE FROM senhas_pdf WHERE cliente=? AND senha=?",
             (cliente, senha)
         )
+    log.info("Senha removida | cliente=%s", cliente)
 
 
 def listar() -> list:

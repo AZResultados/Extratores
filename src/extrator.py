@@ -11,9 +11,12 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+from logger import get_logger
 from pdf_router import rotear
 import cartao_mercadopago as mp
 import cartao_santander   as sa
+
+log = get_logger("extratores.extrator")
 
 # Registro de extratores — adicionar nova entrada ao incluir novo emissor
 EXTRATORES = {
@@ -32,6 +35,8 @@ if __name__ == "__main__":
     parser.add_argument("--input-dir", required=True)
     parser.add_argument("--cliente",   required=True)
     args = parser.parse_args()
+
+    log.info("Iniciando | cliente=%s | pasta=%s", args.cliente, args.input_dir)
 
     avisos     = []
     input_path = Path(args.input_dir)
@@ -64,10 +69,13 @@ if __name__ == "__main__":
             if not processar:
                 raise ValueError(f"Extrator nao implementado para emissor: {emissor}")
             lancamentos = processar(pdf_path, source)
+            log.info("PDF processado | arquivo=%s | emissor=%s | lancamentos=%d",
+                     pdf_path.name, emissor, len(lancamentos))
             emissores_vistos.add(emissor)
             todos_lancamentos.extend(lancamentos)
 
     except Exception as e:
+        log.error("Falha no processamento | cliente=%s | erro=%s", args.cliente, str(e))
         print(str(e), file=sys.stderr)
         sys.exit(1)
 
@@ -79,6 +87,8 @@ if __name__ == "__main__":
         prefixo = "EXT"
 
     id_lote = f"{prefixo}-{ts.strftime('%Y%m%d-%H%M%S')}"
+    log.info("Lote concluido | cliente=%s | total=%d | lote=%s",
+             args.cliente, len(todos_lancamentos), id_lote)
 
     envelope = {
         "id_lote":            id_lote,

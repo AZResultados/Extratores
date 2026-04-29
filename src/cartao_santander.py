@@ -21,7 +21,10 @@ try:
 except ImportError:
     sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
 
+from logger import get_logger
 from pdf_decrypt import descriptografar
+
+log = get_logger("extratores.santander")
 
 X_DIV = 250  # divisão entre coluna esq e dir
 
@@ -43,6 +46,7 @@ def extrair_texto_pdf(source) -> str:
 def extrair_vencimento(texto: str) -> date:
     m = re.search(r"Vencimento.{0,60}?(\d{2}/\d{2}/\d{4})", texto, re.DOTALL)
     if not m:
+        log.warning("Vencimento nao encontrado no texto do PDF")
         raise ValueError("Vencimento não encontrado.")
     return datetime.strptime(m.group(1), "%d/%m/%Y").date()
 
@@ -152,6 +156,7 @@ def parsear_lancamentos(caminho: Path, vencimento: date, source=None) -> list:
                     if m:
                         titular_nome_atual  = " ".join(m.group(1).split())
                         titular_final_atual = m.group(2)
+                        log.debug("Titular detectado | final=%s", titular_final_atual)
                         continue
 
                     # Detectar lançamento
@@ -252,6 +257,7 @@ def validar_total(lancamentos: list, texto: str):
 
 def processar_arquivo(pdf_path: Path, source) -> list:
     """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
+    log.info("Iniciando extracao | arquivo=%s", pdf_path.name)
     texto = extrair_texto_pdf(source)
     if isinstance(source, io.BytesIO):
         source.seek(0)
@@ -259,10 +265,14 @@ def processar_arquivo(pdf_path: Path, source) -> list:
     lancamentos = parsear_lancamentos(pdf_path, venc, source)
     ok, total_pdf, total_calc = validar_total(lancamentos, texto)
     if not ok:
+        log.error("Divergencia de validacao | arquivo=%s | pdf=%.2f | calc=%.2f | diff=%.2f",
+                  pdf_path.name, total_pdf, total_calc, abs(total_pdf - total_calc))
         raise ValueError(
             f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
             f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
         )
+    log.info("Extracao OK | arquivo=%s | lancamentos=%d | total=%.2f",
+             pdf_path.name, len(lancamentos), total_pdf)
     return lancamentos
 
 

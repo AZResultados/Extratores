@@ -17,7 +17,10 @@ try:
 except ImportError:
     sys.exit("ERRO: instale pdfplumber -> pip install pdfplumber")
 
+from logger import get_logger
 from pdf_decrypt import descriptografar
+
+log = get_logger("extratores.mercadopago")
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +44,7 @@ def extrair_texto_pdf(source) -> str:
 def extrair_vencimento(texto: str) -> date:
     m = re.search(r"Vencimento:\s*(\d{2}/\d{2}/\d{4})", texto)
     if not m:
+        log.warning("Vencimento nao encontrado no texto do PDF")
         raise ValueError("Data de vencimento não encontrada.")
     return datetime.strptime(m.group(1), "%d/%m/%Y").date()
 
@@ -56,6 +60,7 @@ def extrair_titular_cartao(texto: str) -> tuple:
     m = re.search(r"Cartão\s+\w+\s+\[[\*\s]*(\d{4})\]", texto)
     if m:
         return nome, m.group(1)
+    log.debug("Final do cartao nao encontrado no PDF")
     return nome, ""
 
 
@@ -198,15 +203,20 @@ def validar_total(lancamentos: list, texto: str):
 
 def processar_arquivo(pdf_path: Path, source) -> list:
     """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
+    log.info("Iniciando extracao | arquivo=%s", pdf_path.name)
     texto       = extrair_texto_pdf(source)
     venc        = extrair_vencimento(texto)
     lancamentos = parsear_lancamentos(texto, venc, pdf_path)
     ok, total_pdf, total_calc = validar_total(lancamentos, texto)
     if not ok:
+        log.error("Divergencia de validacao | arquivo=%s | pdf=%.2f | calc=%.2f | diff=%.2f",
+                  pdf_path.name, total_pdf, total_calc, abs(total_pdf - total_calc))
         raise ValueError(
             f"{pdf_path.name}: divergencia R$ {abs(total_pdf - total_calc):.2f} "
             f"(PDF={total_pdf:.2f} / calculado={total_calc:.2f})"
         )
+    log.info("Extracao OK | arquivo=%s | lancamentos=%d | total=%.2f",
+             pdf_path.name, len(lancamentos), total_pdf)
     return lancamentos
 
 

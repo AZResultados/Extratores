@@ -7,6 +7,10 @@ import os
 import sqlite3
 from pathlib import Path
 
+from logger import get_logger
+
+log = get_logger("extratores.db")
+
 DB_PATH = Path(os.environ.get("EXTRATORES_DB",
                str(Path.home() / ".extratores" / "dados.db")))
 
@@ -34,6 +38,7 @@ def set_cliente(nome: str, base_dir: str):
             INSERT INTO clientes (nome, base_dir) VALUES (?, ?)
             ON CONFLICT(nome) DO UPDATE SET base_dir = excluded.base_dir
         """, (nome, base_dir))
+    log.info("Cliente cadastrado | nome=%s | base_dir=%s", nome, base_dir)
 
 
 def get_cliente(nome: str) -> dict:
@@ -62,3 +67,4 @@ def listar_clientes() -> list:
 def remover_cliente(nome: str):
     with _conectar() as conn:
         conn.execute("DELETE FROM clientes WHERE nome=?", (nome,))
+    log.info("Cliente removido | nome=%s", nome)
