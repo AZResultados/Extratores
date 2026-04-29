@@ -4,7 +4,7 @@ Automatiza a consolidação de faturas de cartão de crédito (PDF) em dados est
 
 ## Status
 
-MVP v1.5 funcional. Dois emissores suportados: Mercado Pago e Santander.
+MVP v1.6 funcional. Dois emissores suportados: Mercado Pago e Santander.
 
 ## Estrutura
 
@@ -13,24 +13,34 @@ src/
   extrator.py             — entry point único de produção
   pdf_router.py           — detecta emissor e roteia para o extrator correto
   pdf_decrypt.py          — descriptografia in-memory (pikepdf, zero disco)
+  logger.py               — logging centralizado (RotatingFileHandler)
   cartao_mercadopago.py   — extrator Mercado Pago Visa
   cartao_santander.py     — extrator Santander Elite Mastercard
   db_senha.py             — banco de senhas SQLite
   db_cliente.py           — cadastro de clientes SQLite
   setup_senha.py          — CLI para gestão de senhas
   setup_cliente.py        — CLI para gestão de clientes
+tests/
+  conftest.py             — fixtures: DB isolado, logging suprimido
+  helpers.py              — factory e constantes de schema
+  test_db.py              — testes CRUD (15)
+  test_extratores.py      — testes de parsing e schema (27)
+  test_pdf_router.py      — testes de roteamento (13)
+  test_integracao.py      — testes de integração (9)
 vba/
   ModConfig.bas           — caminhos do projeto (BASE_DIR)
   ModComum.bas            — orquestrador VBA + utilitários compartilhados
   ModProcessar.bas        — botão Processar
   ModClientes.bas         — cadastro de clientes
   ModSenhas.bas           — cadastro de senhas PDF
-  Inativos/               — módulos obsoletos (ModMP.bas, ModSantander.bas)
+  Inativos/               — módulos obsoletos
 docs/
   SDD/                    — requisitos, design doc e tasks
   Esquema_LctosTratados_20260429_0148.md — schema completo da aba de saída
-  Checkpoint_Sinc_20260429_0148.md       — estado do projeto e decisões
-requirements.txt          — dependências Python
+  Checkpoint_Sinc_20260429_0321.md       — estado do projeto e decisões
+requirements.txt          — dependências de produção
+requirements-dev.txt      — dependências de desenvolvimento (pytest)
+pytest.ini                — configuração pytest
 ```
 
 ## Stack
@@ -68,6 +78,25 @@ Schema completo (13 colunas, regras de formação, exemplos):
 
 **Rollback de lote:** deletar todas as linhas onde `ID_Lote` = id_lote a reverter.
 
+## Logging
+
+Arquivo de log: `~/.extratores/extrator.log` (rotativo, 5 MB, 3 backups)  
+Nível padrão: INFO — override via variável de ambiente:
+
+```powershell
+$env:EXTRATORES_LOG_LEVEL = "DEBUG"   # ativa log de parsing detalhado
+$env:EXTRATORES_LOG_LEVEL = "WARNING" # apenas avisos e erros
+```
+
+## Testes
+
+```powershell
+pip install -r requirements-dev.txt
+pytest
+```
+
+65 testes cobrindo: CRUD de banco, parsing de PDF com texto fixo, roteamento de emissor, schema do envelope JSON, exit codes de integração.
+
 ## Emissores suportados
 
 | Emissor | Script | Observação |
@@ -86,7 +115,7 @@ Arquivos versionados seguem o padrão: `nome_AAAAMMDD_HHMM`
 - `AAAAMMDD` = data de geração
 - `HHMM` = horário de geração (24h) — **não é número de versão**
 
-Exemplo: `Checkpoint_Sinc_20260429_0148.md` = gerado em 29/04/2026 às 01:48.
+Exemplo: `Checkpoint_Sinc_20260429_0321.md` = gerado em 29/04/2026 às 03:21.
 
 ---
 

@@ -1,8 +1,8 @@
 # CHECKPOINT_SINC — Extratores AZ Resultados
-v1.5-MVP | 2026-04-29 | Para: Claude Code
+v1.6-MVP | 2026-04-29 | Para: Claude Code
 
-**Revisão:** v6 — corrige fluxo de senha (Seção 4), remove python-dateutil, ajusta diagrama repo  
-**Fonte da verdade:** este documento prevalece sobre Checkpoint_Sinc_20260429_0148.md
+**Revisão:** v7 — logging estruturado (TASK-14) e suite pytest 65 testes (TASK-15)  
+**Fonte da verdade:** este documento prevalece sobre Checkpoint_Sinc_20260429_0235.md
 
 ---
 
@@ -12,10 +12,11 @@ v1.5-MVP | 2026-04-29 | Para: Claude Code
 |------|--------|
 | Repo | PUBLIC https://github.com/AZResultados/Extratores |
 | Branch | main |
-| Extratores prod | extrator.py (entry point único) + cartao_mercadopago.py + cartao_santander.py |
+| Extratores prod | extrator.py + cartao_mercadopago.py + cartao_santander.py |
 | Interface | Extratores.xlsm (a montar — módulos VBA prontos) |
 | requirements.txt | RESOLVIDO ✓ |
-| TASK-01 a TASK-13 | CONCLUÍDAS ✓ |
+| TASK-01 a TASK-15 | CONCLUÍDAS ✓ |
+| Testes | 65 testes — 100% passando |
 | Próxima ação | Montar xlsm e testar com PDFs reais |
 
 ---
@@ -28,6 +29,10 @@ pdfplumber      0.11.9
 pikepdf         10.5.1
 VBA             Excel 365
 Git             public repo AZResultados/Extratores
+
+Dev:
+pytest          9.0.3
+pytest-mock     3.15.1
 ```
 
 ---
@@ -39,44 +44,54 @@ AZResultados/Extratores/
 ├── .gitignore
 ├── README.md
 ├── requirements.txt
+├── requirements-dev.txt
+├── pytest.ini
 ├── src/
-│   ├── extrator.py             (entry point único de produção)
+│   ├── extrator.py             (entry point único; main(args=None) para testabilidade)
 │   ├── pdf_router.py           (detecta emissor por fingerprint)
 │   ├── pdf_decrypt.py          (descriptografia in-memory)
+│   ├── logger.py               (logging centralizado — RotatingFileHandler)
 │   ├── db_senha.py             (banco de senhas SQLite)
 │   ├── db_cliente.py           (cadastro de clientes SQLite)
 │   ├── setup_senha.py          (CLI gestão de senhas)
 │   ├── setup_cliente.py        (CLI gestão de clientes)
 │   ├── cartao_mercadopago.py
 │   └── cartao_santander.py
+├── tests/
+│   ├── conftest.py             (fixtures: NullHandler, DB isolado via tmp_path)
+│   ├── helpers.py              (factory lancamento_valido, constantes schema)
+│   ├── test_db.py              (15 testes CRUD)
+│   ├── test_extratores.py      (27 testes parsers + schema)
+│   ├── test_pdf_router.py      (13 testes roteamento)
+│   └── test_integracao.py      (9 testes exit codes + envelope JSON)
 ├── vba/
-│   ├── ModConfig.bas           (BASE_DIR — único ponto de configuração de caminhos)
-│   ├── ModComum.bas            (ProcessarExtrator + utilitários)
-│   ├── ModProcessar.bas        (botão Processar)
-│   ├── ModClientes.bas         (cadastro de clientes)
-│   └── ModSenhas.bas           (cadastro de senhas PDF)
+│   ├── ModConfig.bas
+│   ├── ModComum.bas
+│   ├── ModProcessar.bas
+│   ├── ModClientes.bas
+│   └── ModSenhas.bas
 └── docs/
     ├── SDD/
     │   ├── Requiriments_20260428_1631.md
-    │   ├── Design_Doc_20260429_0148.md      ← atual
-    │   └── Tasks_20260428_1821.md
-    ├── Esquema_LctosTratados_20260429_0148.md  ← atual
-    └── Checkpoint_Sinc_20260429_0235.md     ← este arquivo
+    │   ├── Design_Doc_20260429_0321.md      ← atual
+    │   └── Tasks_20260429_0321.md           ← atual
+    ├── Esquema_LctosTratados_20260429_0148.md
+    └── Checkpoint_Sinc_20260429_0321.md     ← este arquivo
 
 Fora do repo (local only):
-  vba/Inativos/               — ModMP.bas, ModSantander.bas obsoletos
-  docs/Inativos/              — versões anteriores deste checkpoint
+  vba/Inativos/               — módulos VBA obsoletos
+  docs/Inativos/              — versões anteriores de checkpoints
   docs/SDD/Inativos/          — versões anteriores de Design Docs e Tasks
 
 Fora do repo (operador):
   C:\Users\[operador]\OneDrive\Documentos\Automações\Extratores.xlsm
-    Aba: LctosTratados (única necessária)
-  C:\Users\[operador]\.extratores\dados.db   — banco SQLite de senhas e clientes
+  C:\Users\[operador]\.extratores\dados.db     — banco SQLite
+  C:\Users\[operador]\.extratores\extrator.log — log rotativo
 ```
 
 ---
 
-## 4. FLUXO ATUAL (v1.5 — implementado)
+## 4. FLUXO ATUAL (v1.6 — implementado)
 
 ```
 [botão Processar] → ModProcessar.Processar()
@@ -85,26 +100,21 @@ Fora do repo (operador):
   └─ ProcessarExtrator(cliente, inputDir)
        └─ WScript.Shell.Exec()
             cmd /c python.exe extrator.py --cliente X --input-dir Y
-            oExec.StdIn.Close  ← stdin fechado imediatamente; extrator.py não lê stdin
-            → Python: pdf_router.rotear(pdf_path, cliente)
-                     → tenta abrir sem senha
-                     → se protegido: cicla senhas via db_senha.get_todas_senhas(cliente)
-                       (senhas lidas do SQLite interno — nao passadas pelo VBA)
-                     → detecta emissor por fingerprint de texto
+            oExec.StdIn.Close  ← stdin fechado imediatamente
+            → Python: main(args) → extrator.py
+                     → pdf_router.rotear(pdf_path, cliente)
+                       → tenta sem senha; se protegido, cicla db_senha.get_todas_senhas()
+                       → detecta emissor por fingerprint de texto
                      → processar_arquivo(pdf_path, source)
                      → json.dumps(envelope) → sys.stdout
-            → VBA: jsonStr = oExec.StdOut.ReadAll (bloqueia até término)
+                     → logger: INFO por PDF, INFO lote concluído
+            → VBA: jsonStr = oExec.StdOut.ReadAll
                    errStr  = oExec.StdErr.ReadAll
                    if ExitCode<>0: MsgBox errStr → Exit Sub
                    On Error GoTo ErroParse (cobre parse + gravação)
-                   ScriptControl → parse jsonStr → checa "avisos" → MsgBox
                    → APPEND em LctosTratados (13 colunas)
 
-[botão Cadastrar Senha] → ModSenhas.CadastrarSenhaPDF()
-  └─ SelecionarCliente() → InputBox senha
-  └─ Exec: setup_senha.py add <cliente> --stdin
-           oExec.StdIn.WriteLine senha  ← única vez que stdin entrega senha ao Python
-           oExec.StdIn.Close
+[botão Cadastrar Senha] → stdin entrega senha apenas ao setup_senha.py
 ```
 
 ---
@@ -113,15 +123,15 @@ Fora do repo (operador):
 
 ```json
 {
-  "id_lote": "SA-20260429-023500",
-  "data_processamento": "2026-04-29T02:35:00",
+  "id_lote": "SA-20260429-032100",
+  "data_processamento": "2026-04-29T03:21:00",
   "emissor": "santander|mercadopago|multi",
   "cliente": "NOME-CLIENTE",
   "avisos": [],
   "lancamentos": [
     {
       "cliente":            "NOME-CLIENTE",
-      "id_lote":            "SA-20260429-023500",
+      "id_lote":            "SA-20260429-032100",
       "arquivo":            "fatura.pdf",
       "titular":            "NOME TITULAR",
       "final_cartao":       "1234",
@@ -137,14 +147,6 @@ Fora do repo (operador):
   ]
 }
 ```
-
-Regras:
-- `id_lote` formato `{EMISSOR}-{YYYYMMDD}-{HHMMSS}` — NÃO usar UUID
-- `emissor` = `"multi"` quando pasta mista
-- `avisos` sempre presente (lista vazia = execução limpa)
-- `arquivo` = path.name apenas, SEM caminho absoluto
-- `data_compra` = null quando impossível inferir
-- `parcela_num` / `qtde_parcelas` = 0 para não parcelados
 
 ---
 
@@ -166,9 +168,6 @@ Regras:
 | L   | descricao_adaptada | String             | VARCHAR           |
 | M   | valor              | Double             | DECIMAL(10,2)     |
 
-**Modo escrita: APPEND acumulativo** — nunca deletar linhas existentes.  
-Rollback: deletar todas as linhas onde Col B = id_lote a reverter.
-
 Schema completo com regras: `docs/Esquema_LctosTratados_20260429_0148.md`
 
 ---
@@ -189,8 +188,8 @@ Schema completo com regras: `docs/Esquema_LctosTratados_20260429_0148.md`
 
 ## 8. TASKS — SPEC DE IMPLEMENTAÇÃO
 
-TASK-01 a TASK-13 — **todas CONCLUÍDAS** em 2026-04-28/29.  
-Ver `docs/SDD/Tasks_20260428_1821.md` para spec completa.
+TASK-01 a TASK-15 — **todas CONCLUÍDAS** em 2026-04-28/29.  
+Ver `docs/SDD/Tasks_20260429_0321.md` para spec completa.
 
 ---
 
@@ -221,14 +220,16 @@ Ver `docs/SDD/Tasks_20260428_1821.md` para spec completa.
 | A21 | Schema v2: data_compra inferida em Python (NFR-01) — pode ser null |
 | A22 | Schema v2: descricao_adaptada montada em Python (NFR-01) — VBA grava, nunca monta |
 | A23 | Tipo "Ajuste" removido do domínio — absorvido por "Outros" |
+| A24 | Logging em arquivo rotativo — nunca logar senhas, CPFs ou números completos de cartão |
+| A25 | extrator.main(args=None) — CLI testável in-process sem subprocess; VBA não afetado |
 
 ---
 
 ## 10. PROTOCOLO DE EXECUÇÃO
 
-1. Testar com PDF real após montar o xlsm
-2. Commit atômico após cada mudança: mensagem genérica, sem dados sensíveis
-3. Se testes quebrarem → corrigir antes de avançar
+1. Rodar `pytest` antes de qualquer push — 65 testes devem passar
+2. Testar com PDF real após montar o xlsm
+3. Commit atômico após cada mudança: mensagem genérica, sem dados sensíveis
 4. Início de sessão: injetar este checkpoint como contexto
 
 ---
@@ -263,13 +264,15 @@ Ver `docs/SDD/Tasks_20260428_1821.md` para spec completa.
 | Env vars | ✅ mesmo conceito | `os.environ.get()` funciona igual |
 | Caminhos de input | ⚠️ atenção | `--input-dir` já é arg CLI; em Docker será volume mount |
 | Timezone / datas | ⚠️ verificar | Container deve ter `TZ=America/Sao_Paulo` |
+| Log file path | ⚠️ atenção | `~/.extratores/extrator.log` funciona em Linux; em Docker usar volume mount |
 
 ### 11.4 O que NÃO muda na migração
 
-- Os scripts Python (`cartao_*.py`, `pdf_decrypt.py`, `pdf_router.py`, `extrator.py`) — zero alteração de código
+- Os scripts Python (`cartao_*.py`, `pdf_decrypt.py`, `pdf_router.py`, `extrator.py`, `logger.py`) — zero alteração de código
 - O envelope JSON — é o contrato de interface; permanece idêntico
 - O schema de campos A→M — mapeia diretamente para colunas de tabela de banco
 - Os exit codes (0 = sucesso, 1 = erro fatal) — padrão Unix, perfeito para Docker
+- A suite de testes — roda igual em Linux
 
 ### 11.5 Dockerfile mínimo de referência (pós-MVP)
 
@@ -297,6 +300,6 @@ ENTRYPOINT ["python", "src/extrator.py"]
 ## META
 
 repo: https://github.com/AZResultados/Extratores  
-versão: 1.5-MVP  
+versão: 1.6-MVP  
 próxima ação: Montar xlsm e testar com PDFs reais  
-gerado: 2026-04-29 | fonte: Design_Doc_20260429_0148 + Tasks_20260428_1821 + Checkpoint_20260429_0148
+gerado: 2026-04-29 | fonte: Design_Doc_20260429_0321 + Tasks_20260429_0321 + Checkpoint_20260429_0235
