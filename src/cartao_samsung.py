@@ -94,3 +94,38 @@ def extrair_segmento(page, col: str) -> list:
         resultado.append((y, tokens))
 
     return resultado
+
+
+# ---------------------------------------------------------------------------
+# Inferência de ano
+# ---------------------------------------------------------------------------
+
+def inferir_ano_parcelado(mes: int, vencimento: date, parcela_atual: int) -> int:
+    ano      = vencimento.year
+    mes_orig = vencimento.month - (parcela_atual - 1)
+    while mes_orig <= 0:
+        mes_orig += 12
+        ano      -= 1
+    mes_ref = mes_orig % 12 or 12
+    return ano if mes <= mes_ref else ano - 1
+
+
+def inferir_ano_avista(mes: int, vencimento: date) -> int:
+    return vencimento.year - 1 if mes > vencimento.month else vencimento.year
+
+
+# ---------------------------------------------------------------------------
+# Classificação
+# ---------------------------------------------------------------------------
+
+KEYWORDS_OUTROS = ["iof", "juros", "multa", "anuidade", "encargo", "refinanc"]
+
+
+def classificar_tipo(descricao: str, tem_parcela: bool, secao_atual: str) -> str:
+    if secao_atual == "pagamentos":
+        return "Pagamento"
+    dl = descricao.lower()
+    for kw in KEYWORDS_OUTROS:
+        if kw in dl:
+            return "Outros"
+    return "Compra parcelada" if tem_parcela else "Compra à vista"
