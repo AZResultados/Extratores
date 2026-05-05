@@ -134,13 +134,13 @@ def parsear_lancamentos(texto: str, pdf_path: Path) -> list:
         # Resgate (tudo em uma linha)
         m = _RE_RESGATE.match(linha)
         if m:
-            data_str, vb, ir, iof, _sl = m.groups()
+            data_str, vb, ir, iof, sl = m.groups()
             data_fmt = datetime.strptime(data_str, "%d/%m/%Y").strftime("%d/%m/%Y")
-            vb_f  = _v(vb)
+            sl_f  = _v(sl)
             ir_f  = _v(ir)
             iof_f = _v(iof)
             lancamentos.append(_lcto(
-                pdf_path, titular, data_fmt, "Resgate RDB", "Sa\xedda", -vb_f
+                pdf_path, titular, data_fmt, "Resgate RDB", "Sa\xedda", -sl_f
             ))
             if ir_f > 0:
                 lancamentos.append(_lcto(
@@ -187,15 +187,15 @@ def parsear_lancamentos(texto: str, pdf_path: Path) -> list:
 # Validação
 # ---------------------------------------------------------------------------
 
-def validar(lancamentos: list, texto: str):
+def validar(lancamentos: list, texto: str, saldo_abertura=None):
     """
-    Para cada resgate: confirma valor_bruto - IR - IOF = saldo_líquido (tolerância R$ 0,10).
-    Essa é a única verificação aritmética possível a partir do extrato —
-    o saldo_final do período é o saldo da conta investida e não pode ser
-    recalculado a partir das movimentações do período sem o saldo de abertura.
+    1. Per-row: valor_bruto - IR - IOF = saldo_líquido (tolerância R$ 0,10).
+    2. Se saldo_abertura fornecido: saldo_abertura - resgates_bruto + aplicações + rendimento
+       deve igualar o saldo_final do período impresso no PDF (tolerância R$ 0,10).
     """
-    saldo_final = extrair_saldo_final(texto)
+    saldo_final_pdf = extrair_saldo_final(texto)
 
+    # --- validação per-row ---
     for m in _RE_RESGATE.finditer(texto):
         data_str, vb, ir, iof, sl = m.groups()
         vb_f  = _v(vb)
@@ -212,9 +212,31 @@ def validar(lancamentos: list, texto: str):
                 f"(diff={diff:.2f} > R$ 0,10)"
             )
 
+    # --- validação de saldo (requer saldo_abertura) ---
+    if saldo_abertura is not None:
+        # saldo_liq + IR + IOF = valor_bruto — reconstitui o total que saiu do RDB
+        _desc_resgate = {"Resgate RDB", "IR s/ Resgate RDB", "IOF s/ Resgate RDB"}
+        sum_resgates  = sum(abs(l["valor"]) for l in lancamentos if l["descricao"] in _desc_resgate)
+        sum_aplicacoes = sum(l["valor"] for l in lancamentos if l["descricao"] == "Aplica\xe7\xe3o RDB")
+        sum_rendimento = sum(l["valor"] for l in lancamentos if l["descricao"] == "Rendimento RDB")
+        saldo_calc = saldo_abertura - sum_resgates + sum_aplicacoes + sum_rendimento
+        diff_saldo = abs(saldo_calc - saldo_final_pdf)
+        if diff_saldo > 0.10:
+            raise ValueError(
+                f"Saldo final divergente: abertura {saldo_abertura:.2f} "
+                f"- resgates {sum_resgates:.2f} + aplica\xe7\xf5es {sum_aplicacoes:.2f} "
+                f"+ rendimento {sum_rendimento:.2f} = {saldo_calc:.2f} "
+                f"≠ saldo_final_pdf {saldo_final_pdf:.2f} "
+                f"(diff={diff_saldo:.2f} > R$ 0,10)"
+            )
+        log.info(
+            "Valida\xe7\xe3o saldo OK | abertura=%.2f | calc=%.2f | pdf=%.2f",
+            saldo_abertura, saldo_calc, saldo_final_pdf,
+        )
+
     log.info(
         "Valida\xe7\xe3o OK | saldo_final_pdf=R$%.2f | lancamentos=%d",
-        saldo_final, len(lancamentos),
+        saldo_final_pdf, len(lancamentos),
     )
 
 
@@ -222,12 +244,12 @@ def validar(lancamentos: list, texto: str):
 # Processar arquivo / pasta
 # ---------------------------------------------------------------------------
 
-def processar_arquivo(pdf_path: Path, source) -> list:
+def processar_arquivo(pdf_path: Path, source, saldo_abertura=None) -> list:
     """Processa um PDF já aberto (source = Path ou BytesIO). Chamado pelo extrator.py."""
     log.info("Iniciando extra\xe7\xe3o | arquivo=%s", pdf_path.name)
     texto = extrair_texto_pdf(source)
     lancamentos = parsear_lancamentos(texto, pdf_path)
-    validar(lancamentos, texto)
+    validar(lancamentos, texto, saldo_abertura)
     log.info("Extra\xe7\xe3o OK | arquivo=%s | lancamentos=%d",
              pdf_path.name, len(lancamentos))
     return lancamentos
@@ -241,7 +263,8 @@ def main(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", required=True)
     parser.add_argument("--cliente",   required=True)
-    parser.add_argument("--password",  default="")  # ignorado: PDF sem senha
+    parser.add_argument("--password",      default="")    # ignorado: PDF sem senha
+    parser.add_argument("--saldo-abertura", type=float, default=None)
     args = parser.parse_args(args)
 
     avisos     = []
@@ -269,7 +292,9 @@ def main(args=None):
 
     try:
         for pdf_path in pdfs:
-            todos_lancamentos.extend(processar_arquivo(pdf_path, pdf_path))
+            todos_lancamentos.extend(
+                processar_arquivo(pdf_path, pdf_path, args.saldo_abertura)
+            )
     except Exception as e:
         log.error("Falha | erro=%s", str(e))
         print(str(e), file=sys.stderr)
