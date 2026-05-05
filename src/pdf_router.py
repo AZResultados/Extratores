@@ -24,6 +24,7 @@ FINGERPRINTS = {
     "mercadopago": ["Mercado Pago", "MercadoPago"],
     "santander":   ["Santander", "SANTANDER"],
     "samsung":     ["App Samsung Itaú", "4004 4828"],
+    "nubank_rdb":  ["RDB Resgate Imediato", "Caixinhas PJ"],
 }
 
 
