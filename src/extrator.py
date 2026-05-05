@@ -13,9 +13,10 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from logger import get_logger
 from pdf_router import rotear
-import cartao_mercadopago as mp
-import cartao_santander   as sa
-import cartao_samsung     as sm
+import cartao_mercadopago  as mp
+import cartao_santander    as sa
+import cartao_samsung      as sm
+import extrator_nubank_rdb as nrdb
 
 log = get_logger("extratores.extrator")
 
@@ -24,12 +25,14 @@ EXTRATORES = {
     "mercadopago": mp.processar_arquivo,
     "santander":   sa.processar_arquivo,
     "samsung":     sm.processar_arquivo,
+    "nubank_rdb":  nrdb.processar_arquivo,
 }
 
 PREFIXOS_LOTE = {
     "mercadopago": "MP",
     "santander":   "SA",
     "samsung":     "SM",
+    "nubank_rdb":  "NRD",
 }
 
 
