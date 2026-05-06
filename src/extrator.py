@@ -13,26 +13,29 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from logger import get_logger
 from pdf_router import rotear
-import cartao_mercadopago  as mp
-import cartao_santander    as sa
-import cartao_samsung      as sm
-import extrator_nubank_rdb as nrdb
+import cartao_mercadopago       as mp
+import cartao_santander         as sa
+import cartao_samsung           as sm
+import cartao_itau_personnalite as itp
+import extrator_nubank_rdb      as nrdb
 
 log = get_logger("extratores.extrator")
 
 # Registro de extratores — adicionar nova entrada ao incluir novo emissor
 EXTRATORES = {
-    "mercadopago": mp.processar_arquivo,
-    "santander":   sa.processar_arquivo,
-    "samsung":     sm.processar_arquivo,
-    "nubank_rdb":  nrdb.processar_arquivo,
+    "mercadopago":       mp.processar_arquivo,
+    "santander":         sa.processar_arquivo,
+    "samsung":           sm.processar_arquivo,
+    "itau_personnalite": itp.processar_arquivo,
+    "nubank_rdb":        nrdb.processar_arquivo,
 }
 
 PREFIXOS_LOTE = {
-    "mercadopago": "MP",
-    "santander":   "SA",
-    "samsung":     "SM",
-    "nubank_rdb":  "NRD",
+    "mercadopago":       "MP",
+    "santander":         "SA",
+    "samsung":           "SM",
+    "itau_personnalite": "ITP",
+    "nubank_rdb":        "NRD",
 }
 
 

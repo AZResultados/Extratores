@@ -21,10 +21,11 @@ log = get_logger("extratores.router")
 # Fingerprints por emissor — baseados no texto da primeira pagina
 # Para adicionar novo emissor: incluir nova entrada aqui
 FINGERPRINTS = {
-    "mercadopago": ["Mercado Pago", "MercadoPago"],
-    "santander":   ["Santander", "SANTANDER"],
-    "samsung":     ["App Samsung Itaú", "4004 4828"],
-    "nubank_rdb":  ["RDB Resgate Imediato", "Caixinhas PJ"],
+    "mercadopago":       ["Mercado Pago", "MercadoPago"],
+    "santander":         ["Santander", "SANTANDER"],
+    "samsung":           ["App Samsung Itaú", "4004 4828"],
+    "itau_personnalite": ["40044828", "ITAUUNIBANCOHOLDING"],
+    "nubank_rdb":        ["RDB Resgate Imediato", "Caixinhas PJ"],
 }
 
 
