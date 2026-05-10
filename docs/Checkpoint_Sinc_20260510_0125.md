@@ -15,8 +15,8 @@
 | TASK-01 a TASK-17 | CONCLUÍDAS ✓ |
 | TASK-IT-01 a IT-06 | CONCLUÍDAS ✓ |
 | Testes | **93 testes — 100% passando** |
-| Design Doc ativo | `docs/SDD/Design_Doc_20260506_0236.md` (v1.7 / revisão v11) |
-| Tasks gerais ativo | `docs/SDD/Tasks_20260505_1338.md` (v16) |
+| Design Doc ativo | `docs/SDD/Design_Doc_20260510_0125.md` (v1.7 / revisão v12) |
+| Tasks gerais ativo | `docs/SDD/Tasks_20260510_0125.md` (v17) |
 | Tasks Itaú ativo | `docs/SDD/Tasks_Itau_20260505_1928.md` (v1 — todas concluídas) |
 | **Próxima ação** | **A definir** |
 
@@ -124,8 +124,8 @@ src/
 tests/
   test_itau_personnalite.py    ✅ 14 testes
 docs/SDD/
-  Design_Doc_20260506_0236.md   — v1.7 / revisão v11 (fonte da verdade)
-  Tasks_20260505_1338.md        — v16 (fonte da verdade — tasks gerais)
+  Design_Doc_20260510_0125.md   — v1.7 / revisão v12 (fonte da verdade)
+  Tasks_20260510_0125.md        — v17 (fonte da verdade — tasks gerais)
   Tasks_Itau_20260505_1928.md   — v1 (todas as tasks IT concluídas)
 PDFs de teste:
   C:\Users\jwcos\OneDrive - Azmid\Documentos\Automações\Extrator\PDFsTeste\SemSenha\
