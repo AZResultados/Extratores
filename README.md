@@ -42,7 +42,7 @@ vba/
 docs/
   SDD/                           — requisitos, design doc e tasks
   Esquema_LctosTratados_20260429_0148.md — schema completo da aba de saída
-  Checkpoint_Sinc_20260506_0236.md       — estado do projeto e decisões
+  Checkpoint_Sinc_20260510_0125.md       — estado do projeto e decisões
 requirements.txt                 — dependências de produção
 requirements-dev.txt             — dependências de desenvolvimento (pytest)
 pytest.ini                       — configuração pytest
@@ -71,10 +71,14 @@ pip install -r requirements.txt
 3. Clicar em [Processar], selecionar cliente e pasta com os PDFs do mês
 4. Dados são gravados na aba `LctosTratados` — **modo append acumulativo**
 
-## PDFs protegidos por senha
+## PDFs com e sem senha
+
+O roteador tenta abrir cada PDF sem senha primeiro; só recorre às senhas cadastradas se o texto extraído estiver vazio ou o emissor não for reconhecido. Isso significa que faturas do mesmo emissor salvas com ou sem senha são processadas automaticamente, sem configuração extra.
 
 Senhas armazenadas em banco SQLite local (`~/.extratores/dados.db`) — sem texto claro em planilha.  
 O VBA entrega a senha ao Python via stdin; ela nunca aparece em linha de comando.
+
+**PDFs salvos como imagem (scan):** não são suportados. `pdfplumber` extrai apenas texto nativo; PDFs gerados por "imprimir → salvar como PDF" ou escaneados não possuem camada de texto. O sistema registra `WARNING` no log e reporta erro ao VBA.
 
 ## Saída — aba LctosTratados
 
@@ -93,6 +97,15 @@ $env:EXTRATORES_LOG_LEVEL = "DEBUG"   # ativa log de parsing detalhado
 $env:EXTRATORES_LOG_LEVEL = "WARNING" # apenas avisos e erros
 ```
 
+Entradas relevantes geradas pelo roteador:
+
+| Nível | Mensagem | Causa |
+|-------|----------|-------|
+| INFO | `Emissor detectado \| senha=nenhuma` | PDF aberto sem senha |
+| INFO | `Emissor detectado` | PDF descriptografado com senha cadastrada |
+| WARNING | `PDF sem texto extraivel \| possivelmente salvo como imagem` | PDF baseado em imagem (scan) |
+| WARNING | `Emissor nao identificado` | Senha ausente ou emissor fora do padrão suportado |
+
 ## Testes
 
 ```powershell
@@ -107,9 +120,9 @@ pytest
 | Emissor | Script | Observação |
 |---|---|---|
 | Mercado Pago Visa | cartao_mercadopago.py | PDF sem senha |
-| Santander Elite Mastercard | cartao_santander.py | PDF requer senha cadastrada |
-| Samsung Itaú Mastercard | cartao_samsung.py | PDF requer senha cadastrada |
-| Itaú Personnalitê | cartao_itau_personnalite.py | PDF requer senha cadastrada |
+| Santander Elite Mastercard | cartao_santander.py | PDF com ou sem senha — tenta sem senha primeiro |
+| Samsung Itaú Mastercard | cartao_samsung.py | PDF com ou sem senha — tenta sem senha primeiro |
+| Itaú Personnalitê | cartao_itau_personnalite.py | PDF com ou sem senha — tenta sem senha primeiro |
 | NuBank RDB | extrator_nubank_rdb.py | PDF sem senha |
 
 ## Requisitos de negócio
