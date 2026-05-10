@@ -67,6 +67,8 @@ def rotear(pdf_path: Path, cliente: str) -> tuple:
             log.info("Emissor detectado | arquivo=%s | emissor=%s | senha=nenhuma",
                      pdf_path.name, emissor)
             return emissor, pdf_path
+        log.debug("Sem texto na tentativa sem senha | arquivo=%s | pode estar criptografado",
+                  pdf_path.name)
     except Exception:
         pass
 
@@ -75,8 +77,15 @@ def rotear(pdf_path: Path, cliente: str) -> tuple:
     log.debug("Ciclando senhas | arquivo=%s | total=%d", pdf_path.name, len(senhas))
     for senha in senhas:
         try:
-            source  = tentar_descriptografar(pdf_path, senha)
-            texto   = _ler_primeira_pagina(source)
+            source = tentar_descriptografar(pdf_path, senha)
+            texto  = _ler_primeira_pagina(source)
+            if not texto.strip():
+                log.warning(
+                    "PDF sem texto extraivel | arquivo=%s | "
+                    "possivelmente salvo como imagem (PDF escaneado)",
+                    pdf_path.name,
+                )
+                break
             emissor = detectar_emissor(texto)
             log.info("Emissor detectado | arquivo=%s | emissor=%s", pdf_path.name, emissor)
             return emissor, source
